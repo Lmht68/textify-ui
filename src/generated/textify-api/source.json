@@ -1,0 +1,1278 @@
+{
+  "components": {
+    "schemas": {
+      "ActiveTranscriptionJobLinks": {
+        "additionalProperties": false,
+        "description": "Expose stable active-job links for one Transcription Job capability.",
+        "properties": {
+          "cancel": {
+            "description": "Same-origin relative cancellation URL for this bearer capability.",
+            "examples": [
+              "/api/transcription-jobs/00000000-0000-4000-8000-000000000000/cancellation"
+            ],
+            "title": "Cancel",
+            "type": "string"
+          },
+          "self": {
+            "description": "Same-origin relative status URL that acts as a bearer capability.",
+            "examples": [
+              "/api/transcription-jobs/00000000-0000-4000-8000-000000000000"
+            ],
+            "title": "Self",
+            "type": "string"
+          }
+        },
+        "required": [
+          "self",
+          "cancel"
+        ],
+        "title": "ActiveTranscriptionJobLinks",
+        "type": "object"
+      },
+      "CancelledTranscriptionJobResponse": {
+        "additionalProperties": false,
+        "description": "Serialize the safe representation of a cancelled finished job.",
+        "properties": {
+          "finished_at": {
+            "format": "date-time",
+            "title": "Finished At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid4",
+            "title": "Id",
+            "type": "string"
+          },
+          "links": {
+            "$ref": "#/components/schemas/FinishedTranscriptionJobLinks"
+          },
+          "outcome": {
+            "const": "cancelled",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "const": "finished",
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "title": "Submitted At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "outcome",
+          "submitted_at",
+          "started_at",
+          "finished_at",
+          "links"
+        ],
+        "title": "CancelledTranscriptionJobResponse",
+        "type": "object"
+      },
+      "ErrorDetail": {
+        "description": "Describe one stable public API failure.",
+        "examples": [
+          {
+            "code": "invalid_url",
+            "message": "The submitted URL is invalid."
+          }
+        ],
+        "properties": {
+          "code": {
+            "description": "Stable machine-readable error code.",
+            "enum": [
+              "invalid_url",
+              "unsupported_platform",
+              "invalid_request",
+              "unsupported_content",
+              "video_too_long",
+              "invalid_media_duration",
+              "unsupported_media",
+              "no_usable_transcript",
+              "metadata_retrieval_failed",
+              "audio_download_failed",
+              "transcription_failed",
+              "transcription_capacity_exceeded",
+              "job_not_found",
+              "job_already_finished",
+              "job_store_unavailable",
+              "queue_timeout",
+              "worker_interrupted",
+              "metadata_timeout",
+              "audio_download_timeout",
+              "transcription_timeout",
+              "internal_error"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "description": "Safe human-readable message that is not byte-stable.",
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorDetail",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "description": "Serialize the safe public API error envelope.",
+        "examples": [
+          {
+            "error": {
+              "code": "invalid_url",
+              "message": "The submitted URL is invalid."
+            }
+          }
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail",
+            "description": "Safe stable error detail."
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "FailedTranscriptionJobResponse": {
+        "additionalProperties": false,
+        "description": "Serialize the safe reason for a failed finished job.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          },
+          "finished_at": {
+            "format": "date-time",
+            "title": "Finished At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid4",
+            "title": "Id",
+            "type": "string"
+          },
+          "links": {
+            "$ref": "#/components/schemas/FinishedTranscriptionJobLinks"
+          },
+          "outcome": {
+            "const": "failed",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "const": "finished",
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "title": "Submitted At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "outcome",
+          "submitted_at",
+          "started_at",
+          "finished_at",
+          "error",
+          "links"
+        ],
+        "title": "FailedTranscriptionJobResponse",
+        "type": "object"
+      },
+      "FinishedTranscriptionJobLinks": {
+        "additionalProperties": false,
+        "description": "Expose the stable terminal-job link for one capability.",
+        "properties": {
+          "self": {
+            "description": "Same-origin relative status URL that remains a bearer capability.",
+            "examples": [
+              "/api/transcription-jobs/00000000-0000-4000-8000-000000000000"
+            ],
+            "title": "Self",
+            "type": "string"
+          }
+        },
+        "required": [
+          "self"
+        ],
+        "title": "FinishedTranscriptionJobLinks",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "description": "Represent a successful application health check.",
+        "examples": [
+          {
+            "status": "ok"
+          }
+        ],
+        "properties": {
+          "status": {
+            "const": "ok",
+            "default": "ok",
+            "description": "Application readiness state after successful startup.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "Platform": {
+        "description": "Content platforms known to the transcription context.",
+        "enum": [
+          "youtube",
+          "instagram",
+          "facebook",
+          "tiktok",
+          "x"
+        ],
+        "title": "Platform",
+        "type": "string"
+      },
+      "ProcessingTranscriptionJobResponse": {
+        "additionalProperties": false,
+        "description": "Serialize the safe public representation of a processing job.",
+        "properties": {
+          "cancellation_requested": {
+            "title": "Cancellation Requested",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid4",
+            "title": "Id",
+            "type": "string"
+          },
+          "links": {
+            "$ref": "#/components/schemas/ActiveTranscriptionJobLinks"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "const": "processing",
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "title": "Submitted At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "submitted_at",
+          "started_at",
+          "cancellation_requested",
+          "links"
+        ],
+        "title": "ProcessingTranscriptionJobResponse",
+        "type": "object"
+      },
+      "QueuedTranscriptionJobResponse": {
+        "additionalProperties": false,
+        "description": "Serialize the safe public representation of an accepted queued job.",
+        "properties": {
+          "id": {
+            "format": "uuid4",
+            "title": "Id",
+            "type": "string"
+          },
+          "links": {
+            "$ref": "#/components/schemas/ActiveTranscriptionJobLinks"
+          },
+          "status": {
+            "const": "queued",
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "title": "Submitted At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "submitted_at",
+          "links"
+        ],
+        "title": "QueuedTranscriptionJobResponse",
+        "type": "object"
+      },
+      "SegmentResponse": {
+        "description": "Serialize one normalized timed transcript segment.",
+        "examples": [
+          {
+            "end": 1,
+            "start": 0,
+            "text": "Synthetic transcript segment."
+          }
+        ],
+        "properties": {
+          "end": {
+            "description": "Finite segment end offset in seconds.",
+            "minimum": 0,
+            "title": "End",
+            "type": "number"
+          },
+          "start": {
+            "description": "Finite segment start offset in seconds.",
+            "minimum": 0,
+            "title": "Start",
+            "type": "number"
+          },
+          "text": {
+            "description": "Normalized nonempty segment text.",
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "text"
+        ],
+        "title": "SegmentResponse",
+        "type": "object"
+      },
+      "SourceResponse": {
+        "description": "Serialize canonical source identity and projected metadata.",
+        "examples": [
+          {
+            "channel": "Synthetic channel",
+            "description": "",
+            "duration_seconds": 42,
+            "platform": "youtube",
+            "title": "Synthetic example video",
+            "url": "https://www.youtube.com/watch?v=AbCdEf12345",
+            "video_id": "AbCdEf12345"
+          }
+        ],
+        "minProperties": 1,
+        "properties": {
+          "channel": {
+            "description": "Provider channel or uploader, or an empty string when unavailable.",
+            "title": "Channel",
+            "type": "string"
+          },
+          "description": {
+            "description": "Provider description, or an empty string when unavailable.",
+            "title": "Description",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "description": "Validated positive video duration in seconds.",
+            "exclusiveMinimum": 0,
+            "title": "Duration Seconds",
+            "type": "integer"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/Platform",
+            "description": "Normalized supported video platform."
+          },
+          "title": {
+            "description": "Provider title, or an empty string when unavailable.",
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "description": "Canonical HTTPS source URL.",
+            "title": "Url",
+            "type": "string"
+          },
+          "video_id": {
+            "description": "Canonical provider video identifier.",
+            "title": "Video Id",
+            "type": "string"
+          }
+        },
+        "title": "SourceResponse",
+        "type": "object"
+      },
+      "SucceededTranscriptionJobResponse": {
+        "additionalProperties": false,
+        "description": "Serialize the complete public result of a successful finished job.",
+        "properties": {
+          "finished_at": {
+            "format": "date-time",
+            "title": "Finished At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid4",
+            "title": "Id",
+            "type": "string"
+          },
+          "links": {
+            "$ref": "#/components/schemas/FinishedTranscriptionJobLinks"
+          },
+          "outcome": {
+            "const": "succeeded",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/TranscriptionResponse"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "const": "finished",
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "title": "Submitted At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "outcome",
+          "submitted_at",
+          "started_at",
+          "finished_at",
+          "result",
+          "links"
+        ],
+        "title": "SucceededTranscriptionJobResponse",
+        "type": "object"
+      },
+      "TranscriptMethod": {
+        "description": "Methods used to acquire a normalized transcript.",
+        "enum": [
+          "youtube_captions",
+          "faster_whisper"
+        ],
+        "title": "TranscriptMethod",
+        "type": "string"
+      },
+      "TranscriptRequest": {
+        "additionalProperties": false,
+        "description": "Validate one submitted source URL and response field exclusions.",
+        "examples": [
+          {
+            "url": "https://www.youtube.com/watch?v=AbCdEf12345"
+          },
+          {
+            "exclude": [
+              "transcript.segments"
+            ],
+            "url": "https://www.youtube.com/watch?v=AbCdEf12345"
+          }
+        ],
+        "properties": {
+          "exclude": {
+            "description": "Exact case-sensitive source or transcript leaf paths to omit from the response.",
+            "items": {
+              "enum": [
+                "source.platform",
+                "source.video_id",
+                "source.url",
+                "source.title",
+                "source.description",
+                "source.channel",
+                "source.duration_seconds",
+                "transcript.method",
+                "transcript.language",
+                "transcript.text",
+                "transcript.segments"
+              ],
+              "type": "string"
+            },
+            "title": "Exclude",
+            "type": "array"
+          },
+          "url": {
+            "description": "HTTPS URL for one supported public video.",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "TranscriptRequest",
+        "type": "object"
+      },
+      "TranscriptResponse": {
+        "description": "Serialize normalized transcript content and projected provenance.",
+        "examples": [
+          {
+            "language": "en",
+            "method": "youtube_captions",
+            "segments": [
+              {
+                "end": 1,
+                "start": 0,
+                "text": "Synthetic transcript segment."
+              }
+            ],
+            "text": "Synthetic transcript segment."
+          }
+        ],
+        "minProperties": 1,
+        "properties": {
+          "language": {
+            "description": "Normalized BCP 47 language tag.",
+            "title": "Language",
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/TranscriptMethod",
+            "description": "Transcript acquisition method."
+          },
+          "segments": {
+            "description": "Ordered normalized timed transcript segments.",
+            "items": {
+              "$ref": "#/components/schemas/SegmentResponse"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "text": {
+            "description": "Space-joined text from the ordered normalized segments.",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "title": "TranscriptResponse",
+        "type": "object"
+      },
+      "TranscriptionJobResponse": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/QueuedTranscriptionJobResponse"
+          },
+          {
+            "$ref": "#/components/schemas/ProcessingTranscriptionJobResponse"
+          },
+          {
+            "$ref": "#/components/schemas/SucceededTranscriptionJobResponse"
+          },
+          {
+            "$ref": "#/components/schemas/FailedTranscriptionJobResponse"
+          },
+          {
+            "$ref": "#/components/schemas/CancelledTranscriptionJobResponse"
+          }
+        ]
+      },
+      "TranscriptionResponse": {
+        "description": "Serialize complete projected source metadata and transcript.",
+        "examples": [
+          {
+            "source": {
+              "channel": "Synthetic channel",
+              "description": "",
+              "duration_seconds": 42,
+              "platform": "youtube",
+              "title": "Synthetic example video",
+              "url": "https://www.youtube.com/watch?v=AbCdEf12345",
+              "video_id": "AbCdEf12345"
+            },
+            "transcript": {
+              "language": "en",
+              "method": "youtube_captions",
+              "segments": [
+                {
+                  "end": 1,
+                  "start": 0,
+                  "text": "Synthetic transcript segment."
+                }
+              ],
+              "text": "Synthetic transcript segment."
+            }
+          },
+          {
+            "source": {
+              "channel": "Synthetic channel",
+              "duration_seconds": 42,
+              "platform": "youtube",
+              "title": "Synthetic example video",
+              "url": "https://www.youtube.com/watch?v=AbCdEf12345",
+              "video_id": "AbCdEf12345"
+            },
+            "transcript": {
+              "language": "en",
+              "method": "youtube_captions",
+              "text": "Synthetic transcript segment."
+            }
+          }
+        ],
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/SourceResponse",
+            "description": "Canonical projected source metadata."
+          },
+          "transcript": {
+            "$ref": "#/components/schemas/TranscriptResponse",
+            "description": "Normalized projected transcript result."
+          }
+        },
+        "required": [
+          "source",
+          "transcript"
+        ],
+        "title": "TranscriptionResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Durable Transcription Job acceptance, bearer-capability status inspection, and cancellation for eligible public YouTube, Facebook, Instagram, TikTok, and X videos.",
+    "title": "Textify",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/transcription-jobs": {
+      "post": {
+        "description": "Commit eligible work before returning a same-origin relative `Location` and JSON links. The links are bearer capabilities: possession authorizes polling and cancellation, so clients must not disclose them.",
+        "operationId": "create_transcription_job_api_transcription_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranscriptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedTranscriptionJobResponse"
+                }
+              }
+            },
+            "description": "Queued Transcription Job accepted after durable commit.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "Same-origin relative status URL for the new bearer capability.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Present only while work is active; seconds before status inspection.",
+                "schema": {
+                  "example": 2,
+                  "type": "integer"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible codes: `invalid_url`, `unsupported_platform`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible code: `invalid_request`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible code: `internal_error`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible codes: `transcription_capacity_exceeded`, `job_store_unavailable`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Submit a durable Transcription Job",
+        "tags": [
+          "transcription-jobs"
+        ]
+      }
+    },
+    "/api/transcription-jobs/{job_id}": {
+      "get": {
+        "description": "Poll the same-origin relative bearer capability returned by submission. Responses are `queued`, `processing`, or `finished`; finished outcomes are `succeeded`, `failed`, or `cancelled`. Provider, timeout, `queue_timeout`, `worker_interrupted`, and `internal_error` failures are terminal failed-job reasons in HTTP `200` responses, not separate HTTP failures.",
+        "operationId": "get_transcription_job_api_transcription_jobs__job_id__get",
+        "parameters": [
+          {
+            "description": "Opaque lowercase UUIDv4 bearer capability. Possession authorizes same-origin status inspection and cancellation. Malformed and noncanonical values return `404 job_not_found`.",
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "description": "Opaque lowercase UUIDv4 bearer capability. Possession authorizes same-origin status inspection and cancellation. Malformed and noncanonical values return `404 job_not_found`.",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscriptionJobResponse"
+                }
+              }
+            },
+            "description": "Current safe representation of a Transcription Job.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Present only while work is active; seconds before status inspection.",
+                "schema": {
+                  "example": 2,
+                  "type": "integer"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible code: `job_not_found`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible code: `invalid_request`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible code: `internal_error`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible code: `job_store_unavailable`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Inspect a Transcription Job",
+        "tags": [
+          "transcription-jobs"
+        ]
+      }
+    },
+    "/api/transcription-jobs/{job_id}/cancellation": {
+      "put": {
+        "description": "Submit no request body to accept cancellation through the same-origin bearer capability. A queued job becomes cancelled with `200`; a processing job returns `202` while owned resources finish cleanup.",
+        "operationId": "cancel_transcription_job_api_transcription_jobs__job_id__cancellation_put",
+        "parameters": [
+          {
+            "description": "Opaque lowercase UUIDv4 bearer capability. Possession authorizes same-origin status inspection and cancellation. Malformed and noncanonical values return `404 job_not_found`.",
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "description": "Opaque lowercase UUIDv4 bearer capability. Possession authorizes same-origin status inspection and cancellation. Malformed and noncanonical values return `404 job_not_found`.",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelledTranscriptionJobResponse"
+                }
+              }
+            },
+            "description": "Cancelled Transcription Job after queued or completed cancellation.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingTranscriptionJobResponse"
+                }
+              }
+            },
+            "description": "Processing cancellation durably accepted.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Present only while work is active; seconds before status inspection.",
+                "schema": {
+                  "example": 2,
+                  "type": "integer"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible code: `job_not_found`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible code: `job_already_finished`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible code: `invalid_request`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible code: `internal_error`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Possible code: `job_store_unavailable`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Bearer capability responses are never cacheable.",
+                "schema": {
+                  "example": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Cancel a Transcription Job",
+        "tags": [
+          "transcription-jobs"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Return success only while lifespan startup completed and durable Transcription Job storage remains available.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "The application is ready to serve Transcription Jobs.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Startup is incomplete or a runtime durable-store failure made the application unready.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Fresh server-generated identifier for this HTTP request.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Check application readiness",
+        "tags": [
+          "health"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "Readiness after the lifespan verifies PostgreSQL and creates the durable job lifecycle service.",
+      "name": "health"
+    },
+    {
+      "description": "Durable queued Transcription Job acceptance, bearer-capability status inspection, and cancellation.",
+      "name": "transcription-jobs"
+    }
+  ]
+}
