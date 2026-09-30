@@ -332,6 +332,43 @@ input::placeholder {
   letter-spacing: -0.025em;
 }
 
+.reading-window__title h2:focus {
+  outline: 2px solid var(--color-mint);
+  outline-offset: 3px;
+}
+
+.source-metadata {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding-block: 1rem;
+  border-block-end: 1px solid var(--color-rule);
+}
+
+.source-metadata > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+  gap: 1rem;
+  padding-block: 0.625rem;
+}
+
+.source-metadata > div + div {
+  border-block-start: 1px solid var(--color-rule);
+}
+
+.source-metadata dt {
+  color: var(--color-copper);
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.source-metadata dd {
+  min-inline-size: 0;
+  margin: 0;
+  color: var(--color-paper);
+  overflow-wrap: anywhere;
+}
+
 .command-rail {
   min-inline-size: 0;
 }
@@ -354,6 +391,7 @@ input::placeholder {
   align-items: center;
   min-block-size: 44px;
   padding-inline: 0.75rem;
+  text-decoration: none;
 }
 
 .command-rail__button:not(:disabled):active {
@@ -417,6 +455,12 @@ input::placeholder {
   margin-block-start: 1.4em;
 }
 
+.transcript__empty-state {
+  padding-block: 0.625rem;
+  border-block: 1px solid var(--color-rule);
+  color: var(--color-muted-paper);
+}
+
 .how-it-works {
   padding-block-end: clamp(3rem, 7vw, 7rem);
 }
@@ -472,6 +516,20 @@ input::placeholder {
 
   .command-rail {
     justify-self: end;
+  }
+
+  .source-metadata {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 1.5rem;
+  }
+
+  .source-metadata > div {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+
+  .source-metadata > div:nth-child(2) {
+    border-block-start: 0;
   }
   .submission-rail {
     grid-template-columns: minmax(0, 1fr) auto;

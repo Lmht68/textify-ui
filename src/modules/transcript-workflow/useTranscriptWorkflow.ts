@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { submitSourceVideo } from '../transcript-jobs/transport';
+import { inspectTranscriptJob, submitSourceVideo } from '../transcript-jobs/transport';
 import type {
   SubmitSourceVideoResult,
   TranscriptJobCapability,
   TranscriptJobErrorCode,
+  TranscriptResult,
 } from '../transcript-jobs/transport';
 
 const SUBMISSION_TIMEOUT_MILLISECONDS = 10_000;
@@ -17,14 +18,28 @@ export type SubmissionFeedback = Readonly<{
   isInvalid: boolean;
 }>;
 
+export type TranscriptWorkflowFailure =
+  | Readonly<{ kind: 'job'; code: TranscriptJobErrorCode }>
+  | Readonly<{ kind: 'backend'; code: TranscriptJobErrorCode }>
+  | Readonly<{ kind: 'network' }>
+  | Readonly<{ kind: 'contract' }>;
+
 export type TranscriptWorkflowState =
   | Readonly<{ status: 'sample'; feedback: SubmissionFeedback | null }>
   | Readonly<{ status: 'submitting'; attempt: 1 | 2 }>
   | Readonly<{
-      status: 'queued';
-      capability: TranscriptJobCapability;
-      retryAfterMilliseconds: number;
-    }>;
+    status: 'queued';
+    capability: TranscriptJobCapability;
+    retryAfterMilliseconds: number;
+  }>
+  | Readonly<{
+    status: 'processing';
+    capability: TranscriptJobCapability;
+    retryAfterMilliseconds: number;
+  }>
+  | Readonly<{ status: 'succeeded'; result: TranscriptResult }>
+  | Readonly<{ status: 'failed'; failure: TranscriptWorkflowFailure }>
+  | Readonly<{ status: 'cancelled' }>;
 
 export type UseTranscriptWorkflowResult = Readonly<{
   sourceVideoUrl: string;
@@ -97,6 +112,70 @@ export const useTranscriptWorkflow = (): UseTranscriptWorkflowResult => {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (workflowState.status !== 'queued' && workflowState.status !== 'processing') {
+      return;
+    }
+
+    let ownsPollingEffect = true;
+    let controller: AbortController | null = null;
+    const { capability, retryAfterMilliseconds } = workflowState;
+
+    const poll = async (): Promise<void> => {
+      if (!ownsPollingEffect || !isMountedRef.current) {
+        return;
+      }
+
+      controller = new AbortController();
+      const result = await inspectTranscriptJob({ capability, signal: controller.signal });
+
+      if (!ownsPollingEffect || !isMountedRef.current) {
+        return;
+      }
+
+      switch (result.kind) {
+        case 'queued':
+        case 'processing':
+          setWorkflowState({
+            status: result.kind,
+            capability: result.capability,
+            retryAfterMilliseconds: result.retryAfterMilliseconds,
+          });
+          return;
+        case 'succeeded':
+          setWorkflowState({ status: 'succeeded', result: result.result });
+          return;
+        case 'failed':
+          setWorkflowState({ status: 'failed', failure: { kind: 'job', code: result.code } });
+          return;
+        case 'cancelled':
+          setWorkflowState({ status: 'cancelled' });
+          return;
+        case 'backend-error':
+          setWorkflowState({ status: 'failed', failure: { kind: 'backend', code: result.code } });
+          return;
+        case 'network-error':
+          setWorkflowState({ status: 'failed', failure: { kind: 'network' } });
+          return;
+        case 'contract-error':
+          setWorkflowState({ status: 'failed', failure: { kind: 'contract' } });
+          return;
+        case 'aborted':
+          return;
+      }
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      void poll();
+    }, retryAfterMilliseconds);
+
+    return () => {
+      ownsPollingEffect = false;
+      window.clearTimeout(timeoutId);
+      controller?.abort();
+    };
+  }, [workflowState]);
 
   const setSourceVideoUrl = useCallback((value: string): void => {
     setSourceVideoUrlValue(value);
