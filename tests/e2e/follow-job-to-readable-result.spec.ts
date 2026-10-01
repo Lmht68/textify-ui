@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 import type {
   CancelledTranscriptionJobResponse,
@@ -17,6 +18,39 @@ const STARTED_AT = '2025-01-02T03:04:07+00:00';
 const FINISHED_AT = '2025-01-02T03:04:10+00:00';
 const REQUEST_ID = '00000000-0000-4000-8000-000000000001';
 const SOURCE_VIDEO_URL = 'https://www.tiktok.com/@textify/video/1234567890';
+
+const VIEW_SOURCE_VIDEO_URL = 'https://www.youtube.com/watch?v=AbCdEf12345&t=9&feature=share#chapter';
+const VIEW_SEGMENTS = [
+  {
+    start: 0,
+    end: 44,
+    text: 'Regex? C++ [v2] (draft).* 日本語 النص العربي café.',
+  },
+  {
+    start: 65.8,
+    end: 110,
+    text: 'A longunbrokentokenfortheviewportwithArabicمرحبابالعالمandmoretext.',
+  },
+  {
+    start: 3661.9,
+    end: 3665,
+    text: 'Regex? C++ [v2] (draft).* café.',
+  },
+] as const;
+const VIEW_TRANSCRIPT = {
+  language: 'ar',
+  text: VIEW_SEGMENTS.map((segment) => segment.text).join(' '),
+  segments: [...VIEW_SEGMENTS],
+} satisfies SucceededTranscriptionJobResponse['result']['transcript'];
+const VIEW_SOURCE = {
+  platform: 'youtube',
+  url: VIEW_SOURCE_VIDEO_URL,
+  title: 'A complete Source Video',
+  channel: 'Quiet Studio',
+  duration_seconds: 3665,
+} satisfies SucceededTranscriptionJobResponse['result']['source'];
+
+const EMPTY_TRANSCRIPT_SEGMENTS: Array<never> = [];
 
 const openLandingPage = async (page: Page): Promise<void> => {
   await page.goto('/');
@@ -64,6 +98,7 @@ const succeededJobResponse = ({
   transcript = {
     language: 'en',
     text: 'A complete fixture Transcript.',
+    segments: [{ start: 0, end: 1, text: 'A complete fixture Transcript.' }],
   },
 }: Readonly<{
   capability?: string;
@@ -226,8 +261,8 @@ const installJobRoutes = async (
   };
 };
 
-const submitSourceVideo = async (page: Page): Promise<void> => {
-  await page.getByLabel('Source Video URL').fill(SOURCE_VIDEO_URL);
+const submitSourceVideo = async (page: Page, sourceVideoUrl = SOURCE_VIDEO_URL): Promise<void> => {
+  await page.getByLabel('Source Video URL').fill(sourceVideoUrl);
   await page.getByRole('button', { name: 'Get transcript' }).click();
 };
 
@@ -246,6 +281,26 @@ const expectNoPrivateJobDetails = async (page: Page, capability: string): Promis
   await expect(readingWindow).not.toContainText('transcription_failed');
 };
 
+const showCompletedResult = async ({
+  page,
+  source = VIEW_SOURCE,
+  sourceVideoUrl = VIEW_SOURCE_VIDEO_URL,
+  transcript = VIEW_TRANSCRIPT,
+}: Readonly<{
+  page: Page;
+  source?: SucceededTranscriptionJobResponse['result']['source'];
+  sourceVideoUrl?: string;
+  transcript?: SucceededTranscriptionJobResponse['result']['transcript'];
+}>): Promise<void> => {
+  await installJobRoutes({
+    page,
+    inspections: [{ body: succeededJobResponse({ source, transcript }), retryAfter: undefined }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page, sourceVideoUrl);
+  await expect(page.locator('.reading-window')).toBeVisible();
+};
+
 test('should follow queued processing and success states when a Transcript Job completes', async ({ page }) => {
   const routes = await installJobRoutes({
     page,
@@ -260,7 +315,7 @@ test('should follow queued processing and success states when a Transcript Job c
   await expect(page.getByRole('heading', { name: 'Waiting to start' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Creating transcript' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'A complete Source Video' })).toBeVisible();
-  await expect(page.locator('.transcript')).toHaveText('A complete fixture Transcript.');
+  await expect(page.locator('#transcript-plain-panel p')).toHaveText('A complete fixture Transcript.');
   await expect(page.getByText('Synthetic demo', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Copy' })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Download' })).toBeEnabled();
@@ -512,7 +567,7 @@ test('should preserve an empty backend-valid Transcript without enabling copy or
   await expect(download).toBeDisabled();
   await expect(copy).toHaveAttribute('aria-describedby', 'transcript-empty-state');
   await expect(download).toHaveAttribute('aria-describedby', 'transcript-empty-state');
-  await expect(page.locator('.transcript')).toHaveText('No spoken text was detected in this Source Video.');
+  await expect(page.locator('#transcript-empty-state')).toHaveText('No spoken text was detected in this Source Video.');
 });
 
 test('should copy and download the exact live Transcript when result actions are available', async ({
@@ -531,16 +586,25 @@ test('should copy and download the exact live Transcript when result actions are
   await submitSourceVideo(page);
   const copy = page.getByRole('button', { name: 'Copy' });
   await copy.click();
-  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('A complete fixture Transcript.');
-  await expect(page.getByRole('status', { name: 'Copy feedback' })).toHaveText('Transcript copied.');
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('A complete fixture Transcript.\n');
+  await expect(page.locator('#transcript-copy-feedback')).toHaveText('Plain text copied.');
+  await expect(copy).toHaveAccessibleDescription('Plain text copied.');
   await expect(copy).toBeFocused();
 
   const download = page.getByRole('button', { name: 'Download' });
   const downloadEvent = page.waitForEvent('download');
   await download.click();
   const downloadedFile = await downloadEvent;
-  expect(downloadedFile.suggestedFilename()).toBe('textify-transcript.txt');
-  await expect(page.getByRole('status', { name: 'Download feedback' })).toHaveText('Transcript downloaded.');
+  const downloadPath = await downloadedFile.path();
+
+  if (downloadPath === null) {
+    throw new Error('The browser did not expose the downloaded Transcript.');
+  }
+
+  expect(downloadedFile.suggestedFilename()).toBe('a-complete-source-video-transcript.txt');
+  expect(await readFile(downloadPath)).toEqual(Buffer.from('A complete fixture Transcript.\n', 'utf8'));
+  await expect(page.locator('#transcript-download-feedback')).toHaveText('Plain text downloaded.');
+  await expect(download).toHaveAccessibleDescription('Plain text downloaded.');
   await expect(download).toBeFocused();
 });
 
@@ -549,21 +613,24 @@ test('should retain semantic reading order and accessibility across configured v
 }, testInfo) => {
   await installJobRoutes({
     page,
-    inspections: [
-      {
-        body: succeededJobResponse({
-          transcript: { language: 'ar', text: 'نص عربي كامل.' },
-        }),
-        retryAfter: undefined,
-      },
-    ],
+    inspections: [{ body: succeededJobResponse({ source: VIEW_SOURCE, transcript: VIEW_TRANSCRIPT }), retryAfter: undefined }],
   });
   await openLandingPage(page);
 
-  await submitSourceVideo(page);
-  const transcript = page.locator('.transcript p');
+  await submitSourceVideo(page, VIEW_SOURCE_VIDEO_URL);
+  const transcript = page.locator('#transcript-plain-panel p');
   await expect(transcript).toHaveAttribute('dir', 'auto');
   await expect(transcript).toHaveAttribute('lang', 'ar');
+  await expect(transcript).toContainText('Regex? C++ [v2] (draft).* 日本語 النص العربي café.');
+  await expect(page.getByRole('tablist', { name: 'Transcript views' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Plain text' })).toHaveAttribute('aria-controls', 'transcript-plain-panel');
+  await expect(page.getByRole('tab', { name: 'Timestamps' })).toHaveAttribute(
+    'aria-controls',
+    'transcript-timestamps-panel',
+  );
+  await page.getByRole('tab', { name: 'Timestamps' }).click();
+  await expect(page.locator('.transcript__segment time')).toHaveText(['00:00', '01:05', '01:01:01']);
+  await expect(page.locator('.transcript__segment > p')).toHaveText(VIEW_SEGMENTS.map((segment) => segment.text));
   await expect(page.getByRole('main')).toHaveCount(1);
   await expect(page.locator('.source-metadata dt')).toHaveText([
     'Supported Platform',
@@ -603,3 +670,377 @@ test('should retain semantic reading order and accessibility across configured v
     .analyze();
   expect(accessibilityResults.violations).toEqual([]);
 });
+
+test('should activate transcript tabs with pointer and keyboard controls when Segments are available', async ({ page }) => {
+  await showCompletedResult({ page });
+
+  const plainText = page.getByRole('tab', { name: 'Plain text' });
+  const timestamps = page.getByRole('tab', { name: 'Timestamps' });
+  await expect(plainText).toHaveAttribute('aria-selected', 'true');
+  await expect(plainText).toHaveAttribute('tabindex', '0');
+  await expect(timestamps).toHaveAttribute('aria-selected', 'false');
+  await expect(timestamps).toHaveAttribute('tabindex', '-1');
+  await expect(page.locator('#transcript-plain-panel')).toBeVisible();
+  await expect(page.locator('#transcript-timestamps-panel')).toBeHidden();
+
+  await timestamps.click();
+  await expect(timestamps).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#transcript-timestamps-panel')).toBeVisible();
+
+  await timestamps.focus();
+  await page.evaluate(() => {
+    window.scrollTo({ top: 300, behavior: 'instant' });
+  });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(300);
+  const scrollPosition = 300;
+  await page.keyboard.press('ArrowLeft');
+  await expect(plainText).toBeFocused();
+  await expect(plainText).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollPosition);
+
+  await page.keyboard.press('End');
+  await expect(timestamps).toBeFocused();
+  await expect(timestamps).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Home');
+  await expect(plainText).toBeFocused();
+  await expect(plainText).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowRight');
+  await expect(timestamps).toBeFocused();
+  await expect(timestamps).toHaveAttribute('aria-selected', 'true');
+
+
+  const readingOrder = await page.evaluate(() =>
+    [
+      '.reading-window__heading',
+      '.source-metadata',
+      '[role="tablist"]',
+      '[role="search"]',
+      '#transcript-plain-panel',
+      '#transcript-timestamps-panel',
+    ].map((selector) => {
+      const element = document.querySelector(selector);
+
+      if (element === null) {
+        throw new Error(`Missing ${selector}.`);
+      }
+
+      return [...document.querySelectorAll('*')].indexOf(element);
+    }),
+  );
+  expect(readingOrder).toEqual([...readingOrder].sort((first, second) => first - second));
+});
+
+for (const segments of [undefined, EMPTY_TRANSCRIPT_SEGMENTS]) {
+  test(`should keep Plain text usable when Transcript Segments are ${segments === undefined ? 'omitted' : 'empty'}`, async ({
+    page,
+  }) => {
+    const transcript =
+      segments === undefined
+        ? { language: 'en', text: 'A complete Transcript remains searchable.' }
+        : { language: 'en', text: 'A complete Transcript remains searchable.', segments };
+    await showCompletedResult({ page, transcript });
+
+    const plainText = page.getByRole('tab', { name: 'Plain text' });
+    const timestamps = page.getByRole('tab', { name: 'Timestamps' });
+    const search = page.getByRole('searchbox', { name: 'Search Transcript' });
+    await expect(timestamps).toHaveAttribute('aria-disabled', 'true');
+    await expect(timestamps).toHaveAttribute('aria-describedby', 'transcript-timestamps-unavailable');
+    await expect(timestamps).toHaveAttribute('tabindex', '-1');
+    await expect(
+      page.getByText("Timestamps aren't available because this Transcript has no Transcript Segments.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(search).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Copy' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Download' })).toBeEnabled();
+
+    await search.fill('searchable');
+    await expect(page.getByRole('status', { name: 'Search feedback' })).toHaveText('1 of 1 matches.');
+    await timestamps.click({ force: true });
+    await expect(plainText).toHaveAttribute('aria-selected', 'true');
+    await timestamps.focus();
+    await page.keyboard.press('Enter');
+    await expect(plainText).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Space');
+    await expect(plainText).toHaveAttribute('aria-selected', 'true');
+  });
+}
+
+test('should find literal Unicode matches and preserve context when a Visitor searches a Transcript', async ({ page }) => {
+  await showCompletedResult({ page });
+
+  const search = page.getByRole('searchbox', { name: 'Search Transcript' });
+  const feedback = page.getByRole('status', { name: 'Search feedback' });
+  await search.fill('regex? c++ [v2] (draft).*');
+  await expect(feedback).toHaveText('1 of 2 matches.');
+  await expect(page.locator('mark')).toHaveCount(2);
+  await expect(page.locator('.transcript__match--current')).toHaveText('Regex? C++ [v2] (draft).*');
+  await expect(page.locator('#transcript-plain-panel')).toContainText(VIEW_TRANSCRIPT.text);
+
+  await page.getByRole('button', { name: 'Previous match' }).click();
+  await expect(feedback).toHaveText('2 of 2 matches.');
+  await page.getByRole('button', { name: 'Next match' }).click();
+  await expect(feedback).toHaveText('1 of 2 matches.');
+
+  await search.fill('CAFÉ');
+  await expect(feedback).toHaveText('1 of 2 matches.');
+  await expect(page.locator('mark')).toHaveText(['café', 'café']);
+  await search.fill('النص العربي');
+  await expect(feedback).toHaveText('1 of 1 matches.');
+  await search.fill('日本語');
+  await expect(feedback).toHaveText('1 of 1 matches.');
+
+  await search.fill('01:05');
+  await expect(feedback).toHaveText('No matches.');
+  await page.getByRole('tab', { name: 'Timestamps' }).click();
+  await expect(search).toHaveValue('01:05');
+  await expect(feedback).toHaveText('1 of 1 matches.');
+  await expect(page.locator('.transcript__match--current')).toHaveText('01:05');
+  await search.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(feedback).toHaveText('');
+  await expect(page.locator('mark')).toHaveCount(0);
+  await expect(search).toBeFocused();
+});
+
+test('should render complete Segment context responsively when a Transcript contains one thousand Segments', async ({
+  page,
+}) => {
+  const segments = Array.from({ length: 1_000 }, (_, index) => ({
+    start: index,
+    end: index + 1,
+    text: index === 999 ? 'Final Segment contains needle.' : `Segment ${index + 1} context.`,
+  }));
+  await showCompletedResult({
+    page,
+    transcript: {
+      language: 'en',
+      text: segments.map((segment) => segment.text).join(' '),
+      segments,
+    },
+  });
+
+  await page.getByRole('tab', { name: 'Timestamps' }).click();
+  await page.getByRole('searchbox', { name: 'Search Transcript' }).fill('needle');
+  await expect(page.getByRole('status', { name: 'Search feedback' })).toHaveText('1 of 1 matches.', {
+    timeout: 5_000,
+  });
+  await expect(page.locator('.transcript__segment > p').first()).toHaveText('Segment 1 context.');
+  await expect(page.locator('.transcript__segment > p').last()).toHaveText('Final Segment contains needle.');
+});
+
+test('should preserve narrow document bounds and target sizes when timestamped Segments render at 320 pixels', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chromium', 'The 320px aperture is measured deterministically in Chromium.');
+  await page.setViewportSize({ width: 320, height: 844 });
+  await showCompletedResult({ page });
+
+  await page.getByRole('tab', { name: 'Timestamps' }).click();
+  await expect(page.locator('.transcript__segment time').last()).toHaveText('01:01:01');
+  const dimensions = await page.locator('button, a, input').evaluateAll((elements) =>
+    elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      return { height: box.height, width: box.width };
+    }),
+  );
+  const layout = await page.evaluate(() => ({
+    documentClientWidth: document.documentElement.clientWidth,
+    documentScrollWidth: document.documentElement.scrollWidth,
+    apertureClientWidth: document.querySelector('.reading-window__frame')?.clientWidth,
+    apertureScrollWidth: document.querySelector('.reading-window__frame')?.scrollWidth,
+  }));
+
+  expect(dimensions.every(({ height, width }) => height >= 44 && width >= 44)).toBe(true);
+  expect(layout.documentScrollWidth).toBeLessThanOrEqual(layout.documentClientWidth);
+  expect(layout.apertureScrollWidth).toBeLessThanOrEqual(layout.apertureClientWidth ?? 0);
+});
+
+test('should copy and download the active representation with exact bytes when result actions succeed', async ({
+  browserName,
+  context,
+  page,
+}) => {
+  test.skip(browserName !== 'chromium', 'Clipboard and download behavior is deterministic in Chromium.');
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => {
+    const originalCreateObjectUrl = URL.createObjectURL.bind(URL);
+    const originalRevokeObjectUrl = URL.revokeObjectURL.bind(URL);
+    const instrumentation = { created: [] as Array<string>, revoked: [] as Array<string> };
+
+    Reflect.set(window, '__textifyObjectUrls', instrumentation);
+    Reflect.set(URL, 'createObjectURL', (object: Blob) => {
+      const objectUrl = originalCreateObjectUrl(object);
+      instrumentation.created.push(objectUrl);
+      return objectUrl;
+    });
+    Reflect.set(URL, 'revokeObjectURL', (objectUrl: string) => {
+      instrumentation.revoked.push(objectUrl);
+      originalRevokeObjectUrl(objectUrl);
+    });
+  });
+  await showCompletedResult({ page });
+
+  const plainExport = `${VIEW_TRANSCRIPT.text}\n`;
+  const timestampExport =
+    '[00:00] Regex? C++ [v2] (draft).* 日本語 النص العربي café.\n' +
+    '[01:05] A longunbrokentokenfortheviewportwithArabicمرحبابالعالمandmoretext.\n' +
+    '[01:01:01] Regex? C++ [v2] (draft).* café.\n';
+  const copy = page.getByRole('button', { name: 'Copy' });
+  const download = page.getByRole('button', { name: 'Download' });
+  await page.getByRole('searchbox', { name: 'Search Transcript' }).fill('regex? c++ [v2] (draft).*');
+  await expect(page.locator('mark')).toHaveCount(2);
+
+  await copy.click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(plainExport);
+  await expect(page.locator('#transcript-copy-feedback')).toHaveText('Plain text copied.');
+  await expect(copy).toHaveAccessibleDescription('Plain text copied.');
+  await expect(download).not.toHaveAccessibleDescription('Plain text copied.');
+  await expect(copy).toBeFocused();
+
+  const plainDownload = page.waitForEvent('download');
+  await download.click();
+  const plainFile = await plainDownload;
+  const plainPath = await plainFile.path();
+
+  if (plainPath === null) {
+    throw new Error('The browser did not expose the plain Transcript download.');
+  }
+
+  expect(plainFile.suggestedFilename()).toBe('a-complete-source-video-transcript.txt');
+  expect(await readFile(plainPath)).toEqual(Buffer.from(plainExport, 'utf8'));
+  await expect(page.locator('#transcript-download-feedback')).toHaveText('Plain text downloaded.');
+  await expect(download).toHaveAccessibleDescription('Plain text downloaded.');
+  await expect(copy).not.toHaveAccessibleDescription('Plain text downloaded.');
+  await expect(download).toBeFocused();
+
+  await page.getByRole('tab', { name: 'Timestamps' }).click();
+  await copy.click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(timestampExport);
+  await expect(page.locator('#transcript-copy-feedback')).toHaveText('Timestamps copied.');
+  await expect(copy).toHaveAccessibleDescription('Timestamps copied.');
+
+  const timestampDownload = page.waitForEvent('download');
+  await download.click();
+  const timestampFile = await timestampDownload;
+  const timestampPath = await timestampFile.path();
+
+  if (timestampPath === null) {
+    throw new Error('The browser did not expose the timestamped Transcript download.');
+  }
+
+  expect(timestampFile.suggestedFilename()).toBe('a-complete-source-video-transcript-timestamps.txt');
+  expect(await readFile(timestampPath)).toEqual(Buffer.from(timestampExport, 'utf8'));
+  await expect(page.locator('#transcript-download-feedback')).toHaveText('Timestamps downloaded.');
+  await expect(download).toHaveAccessibleDescription('Timestamps downloaded.');
+  await expect(download).toBeFocused();
+  await expect(page.locator('#transcript-copy-feedback')).toHaveAttribute('aria-live', 'polite');
+  await expect(page.locator('#transcript-copy-feedback')).toHaveAttribute('aria-atomic', 'true');
+  await expect(page.locator('#transcript-download-feedback')).toHaveAttribute('aria-live', 'polite');
+  await expect(page.locator('#transcript-download-feedback')).toHaveAttribute('aria-atomic', 'true');
+  await expect.poll(() => page.evaluate('window.__textifyObjectUrls.revoked.length')).toBe(2);
+  expect(await page.evaluate('window.__textifyObjectUrls.created')).toEqual(
+    await page.evaluate('window.__textifyObjectUrls.revoked'),
+  );
+});
+
+test('should derive safe title-based download names when Source Video titles are unavailable or unsafe', async ({
+  browserName,
+  page,
+}) => {
+  test.skip(browserName !== 'chromium', 'Download names are verified in Chromium.');
+  const emptyTitleSource = { ...VIEW_SOURCE, title: '' };
+  await showCompletedResult({ page, source: emptyTitleSource });
+
+  const emptyTitleDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download' }).click();
+  expect((await emptyTitleDownload).suggestedFilename()).toBe('youtube-video-transcript.txt');
+});
+
+test('should sanitize unsafe Source Video titles when a Visitor downloads a Transcript', async ({
+  browserName,
+  page,
+}) => {
+  test.skip(browserName !== 'chromium', 'Download names are verified in Chromium.');
+  const unsafeTitleSource = { ...VIEW_SOURCE, title: '../Q&A: launch / 東京?.*' };
+  await showCompletedResult({ page, source: unsafeTitleSource });
+
+  const unsafeTitleDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download' }).click();
+  expect((await unsafeTitleDownload).suggestedFilename()).toBe('q-a-launch-東京-transcript.txt');
+});
+
+test('should report exact plain-view action failures when clipboard and object URL adapters fail', async ({
+  browserName,
+  page,
+}) => {
+  test.skip(browserName !== 'chromium', 'Action adapter failures are deterministic in Chromium.');
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.clipboard, 'writeText', {
+      configurable: true,
+      value: async () => Promise.reject(new Error('Clipboard access rejected.')),
+    });
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: () => false,
+    });
+    Reflect.set(URL, 'createObjectURL', () => {
+      throw new Error('Object URL creation failed.');
+    });
+  });
+  await showCompletedResult({ page });
+
+  const copy = page.getByRole('button', { name: 'Copy' });
+  const download = page.getByRole('button', { name: 'Download' });
+  await copy.click();
+  await expect(page.locator('#transcript-copy-feedback')).toHaveText("Couldn't copy the plain text. Try again.");
+  await expect(copy).toHaveAccessibleDescription("Couldn't copy the plain text. Try again.");
+  await expect(copy).toBeFocused();
+  await download.click();
+  await expect(page.locator('#transcript-download-feedback')).toHaveText(
+    "Couldn't download the plain text. Try again.",
+  );
+  await expect(download).toHaveAccessibleDescription("Couldn't download the plain text. Try again.");
+  await expect(download).toBeFocused();
+});
+
+test('should replace only the YouTube time parameter when a Visitor opens a timestamp', async ({ page }) => {
+  await showCompletedResult({ page });
+
+  const openSource = page.getByRole('link', { name: 'Open source' });
+  await expect(openSource).toHaveAttribute('href', VIEW_SOURCE_VIDEO_URL);
+  await page.getByRole('tab', { name: 'Timestamps' }).click();
+  const popupEvent = page.waitForEvent('popup');
+  await page.getByRole('link', { name: 'Open source at 01:05' }).click();
+  const popup = await popupEvent;
+  const timecodeUrl = new URL(popup.url());
+
+  expect(timecodeUrl.searchParams.getAll('t')).toEqual(['65']);
+  expect(timecodeUrl.searchParams.get('v')).toBe('AbCdEf12345');
+  expect(timecodeUrl.searchParams.get('feature')).toBe('share');
+  expect(timecodeUrl.hash).toBe('#chapter');
+  expect(await popup.evaluate(() => window.opener === null)).toBe(true);
+  await popup.close();
+});
+
+for (const [platform, sourceVideoUrl] of [
+  ['tiktok', 'https://www.tiktok.com/@textify/video/1234567890'],
+  ['instagram', 'https://www.instagram.com/reel/AbCdEf12345/'],
+  ['facebook', 'https://www.facebook.com/watch/?v=1234567890'],
+  ['x', 'https://x.com/textify/status/1234567890'],
+] as const) {
+  test(`should leave ${platform} time labels noninteractive when Segments render`, async ({ page }) => {
+    const source = {
+      ...VIEW_SOURCE,
+      platform,
+      url: sourceVideoUrl,
+    };
+    await showCompletedResult({ page, source, sourceVideoUrl });
+
+    await expect(page.getByRole('link', { name: 'Open source' })).toHaveAttribute('href', sourceVideoUrl);
+    await page.getByRole('tab', { name: 'Timestamps' }).click();
+    await expect(page.locator('.transcript__segment time')).toHaveCount(VIEW_SEGMENTS.length);
+    await expect(page.locator('.transcript__time-link')).toHaveCount(0);
+  });
+}

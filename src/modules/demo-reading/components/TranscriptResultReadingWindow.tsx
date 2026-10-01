@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { TranscriptResultViewer } from './TranscriptResultViewer';
 import { copyText } from '../copyText';
 import { downloadText } from '../downloadText';
+import {
+  buildTranscriptDownloadFilename,
+  buildTranscriptExportText,
+} from '../transcriptResultView';
 
+import type { TranscriptView } from '../transcriptResultView';
 import type { TranscriptResult } from '../../transcript-jobs/transport';
 
 type TranscriptResultReadingWindowProps = Readonly<{
@@ -14,6 +20,7 @@ type ActionFeedback =
   | {
     status: 'success' | 'error';
     action: 'copy' | 'download';
+    view: TranscriptView;
     message: string;
   };
 
@@ -32,58 +39,86 @@ const PLATFORM_NAMES: Record<TranscriptResult['source']['platform'], string> = {
 
 export const TranscriptResultReadingWindow = ({ result }: TranscriptResultReadingWindowProps) => {
   const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const [activeView, setActiveView] = useState<TranscriptView>('plain');
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback>({ status: 'idle' });
   const platformName = PLATFORM_NAMES[result.source.platform];
   const title = result.source.title.trim() || `${platformName} video`;
   const channel = result.source.channel.trim();
   const language = displayLanguage(result.transcript.language);
-  const hasTranscript = result.transcript.text.length > 0;
+  const exportText = buildTranscriptExportText({ transcript: result.transcript, view: activeView });
+  const filename = buildTranscriptDownloadFilename({
+    platformName,
+    title: result.source.title,
+    view: activeView,
+  });
+  const hasExportableContent =
+    activeView === 'plain' ? result.transcript.text.length > 0 : result.transcript.segments.length > 0;
+  const activeViewName = activeView === 'plain' ? 'Plain text' : 'Timestamps';
+  const activeViewDescription = activeView === 'plain' ? 'plain text' : 'timestamps';
+  const copyFeedback =
+    actionFeedback.status !== 'idle' && actionFeedback.action === 'copy' && actionFeedback.view === activeView
+      ? actionFeedback.message
+      : '';
+  const downloadFeedback =
+    actionFeedback.status !== 'idle' && actionFeedback.action === 'download' && actionFeedback.view === activeView
+      ? actionFeedback.message
+      : '';
 
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
 
+  const handleActiveViewChange = (view: TranscriptView): void => {
+    if (view === activeView) {
+      return;
+    }
+
+    setActiveView(view);
+    setActionFeedback({ status: 'idle' });
+  };
+
   const handleCopy = async (): Promise<void> => {
-    if (!hasTranscript) {
+    if (!hasExportableContent) {
       return;
     }
 
     try {
-      await copyText(result.transcript.text);
+      await copyText(exportText);
       setActionFeedback({
         status: 'success',
         action: 'copy',
-        message: 'Transcript copied.',
+        view: activeView,
+        message: `${activeViewName} copied.`,
       });
     } catch {
       setActionFeedback({
         status: 'error',
         action: 'copy',
-        message: "Couldn't copy the Transcript. Try again.",
+        view: activeView,
+        message: `Couldn't copy the ${activeViewDescription}. Try again.`,
       });
     }
   };
 
   const handleDownload = (): void => {
-    if (!hasTranscript) {
+    if (!hasExportableContent) {
       return;
     }
 
     try {
-      downloadText({
-        filename: 'textify-transcript.txt',
-        text: `${result.transcript.text}\n`,
-      });
+      downloadText({ filename, text: exportText });
       setActionFeedback({
         status: 'success',
         action: 'download',
-        message: 'Transcript downloaded.',
+        view: activeView,
+        message: `${activeViewName} downloaded.`,
       });
     } catch {
       setActionFeedback({
         status: 'error',
         action: 'download',
-        message: "Couldn't download the Transcript. Try again.",
+        view: activeView,
+        message: `Couldn't download the ${activeViewDescription}. Try again.`,
       });
     }
   };
@@ -121,8 +156,14 @@ export const TranscriptResultReadingWindow = ({ result }: TranscriptResultReadin
                 <button
                   className="command-rail__button"
                   type="button"
-                  disabled={!hasTranscript}
-                  aria-describedby={hasTranscript ? undefined : 'transcript-empty-state'}
+                  disabled={!hasExportableContent}
+                  aria-describedby={
+                    hasExportableContent
+                      ? copyFeedback === ''
+                        ? undefined
+                        : 'transcript-copy-feedback'
+                      : 'transcript-empty-state'
+                  }
                   onClick={() => {
                     void handleCopy();
                   }}
@@ -135,22 +176,32 @@ export const TranscriptResultReadingWindow = ({ result }: TranscriptResultReadin
                   </span>
                   <span className="command-rail__label">Copy</span>
                 </button>
-                <output
-                  className={actionFeedback.status === 'error' ? 'action-status action-status--error' : 'action-status'}
+                <div
+                  className={
+                    actionFeedback.status === 'error' && copyFeedback !== ''
+                      ? 'action-status action-status--error'
+                      : 'action-status'
+                  }
+                  id="transcript-copy-feedback"
                   role="status"
-                  aria-label="Copy feedback"
                   aria-live="polite"
                   aria-atomic="true"
                 >
-                  {actionFeedback.status !== 'idle' && actionFeedback.action === 'copy' ? actionFeedback.message : ''}
-                </output>
+                  {copyFeedback}
+                </div>
               </div>
               <div className="command-rail__action">
                 <button
                   className="command-rail__button"
                   type="button"
-                  disabled={!hasTranscript}
-                  aria-describedby={hasTranscript ? undefined : 'transcript-empty-state'}
+                  disabled={!hasExportableContent}
+                  aria-describedby={
+                    hasExportableContent
+                      ? downloadFeedback === ''
+                        ? undefined
+                        : 'transcript-download-feedback'
+                      : 'transcript-empty-state'
+                  }
                   onClick={handleDownload}
                 >
                   <span className="command-rail__icon" aria-hidden="true">
@@ -162,17 +213,19 @@ export const TranscriptResultReadingWindow = ({ result }: TranscriptResultReadin
                   </span>
                   <span className="command-rail__label">Download</span>
                 </button>
-                <output
-                  className={actionFeedback.status === 'error' ? 'action-status action-status--error' : 'action-status'}
+                <div
+                  className={
+                    actionFeedback.status === 'error' && downloadFeedback !== ''
+                      ? 'action-status action-status--error'
+                      : 'action-status'
+                  }
+                  id="transcript-download-feedback"
                   role="status"
-                  aria-label="Download feedback"
                   aria-live="polite"
                   aria-atomic="true"
                 >
-                  {actionFeedback.status !== 'idle' && actionFeedback.action === 'download'
-                    ? actionFeedback.message
-                    : ''}
-                </output>
+                  {downloadFeedback}
+                </div>
               </div>
             </div>
           </div>
@@ -197,17 +250,14 @@ export const TranscriptResultReadingWindow = ({ result }: TranscriptResultReadin
             <dd>{language.name}</dd>
           </div>
         </dl>
-        <article className="transcript" aria-labelledby="transcript-result-heading">
-          {hasTranscript ? (
-            <p lang={language.lang} dir="auto">
-              {result.transcript.text}
-            </p>
-          ) : (
-            <p className="transcript__empty-state" id="transcript-empty-state">
-              No spoken text was detected in this Source Video.
-            </p>
-          )}
-        </article>
+        <TranscriptResultViewer
+          activeView={activeView}
+          canonicalSourceUrl={result.source.url}
+          languageTag={language.lang}
+          onActiveViewChange={handleActiveViewChange}
+          platform={result.source.platform}
+          transcript={result.transcript}
+        />
       </div>
     </section>
   );

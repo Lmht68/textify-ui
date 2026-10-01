@@ -6,11 +6,13 @@ import {
 import type {
   ErrorDetail,
   Platform,
+  SegmentResponse,
 } from '../../generated/textify-api/types.gen';
 
 const TRANSCRIPT_JOB_PATH_PREFIX = '/api/transcription-jobs/';
 const DEFAULT_POLL_DELAY_MILLISECONDS = 2_000;
 
+const EMPTY_TRANSCRIPT_SEGMENTS: ReadonlyArray<Readonly<SegmentResponse>> = Object.freeze([]);
 type JsonResponseResult = { kind: 'parsed'; body: unknown } | { kind: 'aborted' } | { kind: 'invalid' };
 type TranscriptResultProjection = Readonly<{
   source: Readonly<{
@@ -23,6 +25,7 @@ type TranscriptResultProjection = Readonly<{
   transcript: Readonly<{
     language?: string | undefined;
     text?: string | undefined;
+    segments?: ReadonlyArray<Readonly<SegmentResponse>> | undefined;
   }>;
 }>;
 
@@ -45,6 +48,7 @@ export type TranscriptResult = Readonly<{
   transcript: Readonly<{
     language: string;
     text: string;
+    segments: ReadonlyArray<Readonly<SegmentResponse>>;
   }>;
 }>;
 
@@ -345,6 +349,7 @@ const projectTranscriptResult = (result: TranscriptResultProjection): Transcript
     transcript: {
       language: transcript.language,
       text: transcript.text,
+      segments: transcript.segments ?? EMPTY_TRANSCRIPT_SEGMENTS,
     },
   };
 };
