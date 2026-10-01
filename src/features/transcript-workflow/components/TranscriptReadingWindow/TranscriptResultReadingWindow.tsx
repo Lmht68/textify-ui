@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { TranscriptResultViewer } from './TranscriptResultViewer';
-import { copyText } from '../copyText';
-import { downloadText } from '../downloadText';
+import { copyText } from '../../services/copyText';
+import { downloadText } from '../../services/downloadText';
 import {
   buildTranscriptDownloadFilename,
   buildTranscriptExportText,
-} from '../transcriptResultView';
+} from '../../utils/transcriptResultView';
 
-import type { TranscriptView } from '../transcriptResultView';
-import type { TranscriptResult } from '../../transcript-jobs/transport';
+import type { TranscriptView } from '../../utils/transcriptResultView';
+import type { TranscriptResult } from '../../services/transcriptJobs';
 
 type TranscriptResultReadingWindowProps = Readonly<{
   result: TranscriptResult;

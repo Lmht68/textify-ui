@@ -2,12 +2,12 @@ import {
   zErrorResponse,
   zQueuedTranscriptionJobResponse,
   zTranscriptionJobResponse,
-} from '../../generated/textify-api/zod.gen';
+} from '../../../generated/textify-api/zod.gen';
 import type {
   ErrorDetail,
   Platform,
   SegmentResponse,
-} from '../../generated/textify-api/types.gen';
+} from '../../../generated/textify-api/types.gen';
 
 const TRANSCRIPT_JOB_PATH_PREFIX = '/api/transcription-jobs/';
 const DEFAULT_POLL_DELAY_MILLISECONDS = 2_000;

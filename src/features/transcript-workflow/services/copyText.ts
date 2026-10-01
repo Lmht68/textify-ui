@@ -39,7 +39,7 @@ export const copyText = async (text: string): Promise<void> => {
 
   try {
     if (!document.execCommand('copy')) {
-      throw new Error('The browser did not copy the demo transcript.');
+      throw new Error('The browser did not copy the transcript.');
     }
   } finally {
     textarea.remove();

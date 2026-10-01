@@ -1,3 +1,5 @@
+import './SiteHeader.css';
+
 type SiteHeaderProps = {
   onWordmarkActivate: () => void;
 };

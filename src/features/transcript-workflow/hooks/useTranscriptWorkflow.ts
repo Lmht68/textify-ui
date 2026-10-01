@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { inspectTranscriptJob, submitSourceVideo } from '../transcript-jobs/transport';
+import { inspectTranscriptJob, submitSourceVideo } from '../services/transcriptJobs';
 import type {
   SubmitSourceVideoResult,
   TranscriptJobCapability,
   TranscriptJobErrorCode,
   TranscriptResult,
-} from '../transcript-jobs/transport';
+} from '../services/transcriptJobs';
 
 const SUBMISSION_TIMEOUT_MILLISECONDS = 10_000;
 const MINIMUM_RETRY_DELAY_MILLISECONDS = 500;
@@ -25,7 +25,7 @@ export type TranscriptWorkflowFailure =
   | Readonly<{ kind: 'contract' }>;
 
 export type TranscriptWorkflowState =
-  | Readonly<{ status: 'sample'; feedback: SubmissionFeedback | null }>
+  | Readonly<{ status: 'idle'; feedback: SubmissionFeedback | null }>
   | Readonly<{ status: 'submitting'; attempt: 1 | 2 }>
   | Readonly<{
     status: 'queued';
@@ -86,7 +86,7 @@ const AMBIGUOUS_SUBMISSION_FEEDBACK: SubmissionFeedback = {
 export const useTranscriptWorkflow = (): UseTranscriptWorkflowResult => {
   const [sourceVideoUrl, setSourceVideoUrlValue] = useState('');
   const [workflowState, setWorkflowState] = useState<TranscriptWorkflowState>({
-    status: 'sample',
+    status: 'idle',
     feedback: null,
   });
   const activeRequestRef = useRef<AbortController | null>(null);
@@ -180,8 +180,8 @@ export const useTranscriptWorkflow = (): UseTranscriptWorkflowResult => {
   const setSourceVideoUrl = useCallback((value: string): void => {
     setSourceVideoUrlValue(value);
     setWorkflowState((currentState) =>
-      currentState.status === 'sample' && currentState.feedback !== null
-        ? { status: 'sample', feedback: null }
+      currentState.status === 'idle' && currentState.feedback !== null
+        ? { status: 'idle', feedback: null }
         : currentState,
     );
   }, []);
@@ -195,7 +195,7 @@ export const useTranscriptWorkflow = (): UseTranscriptWorkflowResult => {
     const validationFeedback = validateSourceVideoUrl(trimmedSourceVideoUrl);
 
     if (validationFeedback !== null) {
-      setWorkflowState({ status: 'sample', feedback: validationFeedback });
+      setWorkflowState({ status: 'idle', feedback: validationFeedback });
       return;
     }
 
@@ -207,13 +207,13 @@ export const useTranscriptWorkflow = (): UseTranscriptWorkflowResult => {
 
     const isCurrentSubmission = (): boolean =>
       isMountedRef.current && submissionVersionRef.current === submissionVersion;
-    const returnToSample = (feedback: SubmissionFeedback): void => {
+    const returnToIdle = (feedback: SubmissionFeedback): void => {
       if (!isCurrentSubmission()) {
         return;
       }
 
       isSubmissionLockedRef.current = false;
-      setWorkflowState({ status: 'sample', feedback });
+      setWorkflowState({ status: 'idle', feedback });
     };
     const submitAttempt = async (): Promise<AttemptResult> => {
       const controller = new AbortController();
@@ -253,12 +253,12 @@ export const useTranscriptWorkflow = (): UseTranscriptWorkflowResult => {
     }
 
     if (firstAttempt.result.kind === 'backend-error') {
-      returnToSample(feedbackForBackendError(firstAttempt.result.code));
+      returnToIdle(feedbackForBackendError(firstAttempt.result.code));
       return;
     }
 
     if (firstAttempt.result.kind === 'contract-error') {
-      returnToSample(GENERIC_SUBMISSION_FEEDBACK);
+      returnToIdle(GENERIC_SUBMISSION_FEEDBACK);
       return;
     }
 
@@ -289,12 +289,12 @@ export const useTranscriptWorkflow = (): UseTranscriptWorkflowResult => {
     }
 
     if (secondAttempt.result.kind === 'backend-error') {
-      returnToSample(feedbackForBackendError(secondAttempt.result.code));
+      returnToIdle(feedbackForBackendError(secondAttempt.result.code));
       return;
     }
 
     if (secondAttempt.result.kind === 'contract-error') {
-      returnToSample(GENERIC_SUBMISSION_FEEDBACK);
+      returnToIdle(GENERIC_SUBMISSION_FEEDBACK);
       return;
     }
 
@@ -302,7 +302,7 @@ export const useTranscriptWorkflow = (): UseTranscriptWorkflowResult => {
       return;
     }
 
-    returnToSample(AMBIGUOUS_SUBMISSION_FEEDBACK);
+    returnToIdle(AMBIGUOUS_SUBMISSION_FEEDBACK);
   }, [sourceVideoUrl]);
 
   return {

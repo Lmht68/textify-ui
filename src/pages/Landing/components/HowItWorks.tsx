@@ -1,3 +1,5 @@
+import './HowItWorks.css';
+
 const STEPS = [
   {
     title: 'Submit one public link',

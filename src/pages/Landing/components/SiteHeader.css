@@ -1,0 +1,45 @@
+.site-header {
+  min-block-size: 4.5rem;
+  border-block-end: 1px solid var(--color-rule);
+}
+
+.site-header__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-block-size: 4.5rem;
+}
+
+.wordmark,
+.header-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-paper);
+  font-size: 1rem;
+  font-weight: 680;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.wordmark {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.header-link {
+  padding-inline: 0.5rem;
+  color: var(--color-muted-paper);
+  font-size: 0.9375rem;
+  text-decoration: underline;
+  text-decoration-color: var(--color-rule);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.3em;
+}
+
+.header-link:hover {
+  color: var(--color-paper);
+  text-decoration-color: var(--color-copper);
+}

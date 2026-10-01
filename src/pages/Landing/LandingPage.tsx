@@ -1,17 +1,21 @@
 import { useRef } from 'react';
 
-import { SourceVideoSubmissionForm } from './components/SourceVideoSubmissionForm';
-import { TranscriptReadingWindow } from './components/TranscriptReadingWindow';
+import './LandingPage.css';
+
+import {
+  SourceVideoSubmissionForm,
+  TranscriptReadingWindow,
+  useTranscriptWorkflow,
+} from '../../features/transcript-workflow';
 import { HowItWorks } from './components/HowItWorks';
 import { SiteHeader } from './components/SiteHeader';
-import { useTranscriptWorkflow } from '../transcript-workflow/useTranscriptWorkflow';
 
 const SUPPORTED_PLATFORMS = ['YouTube', 'TikTok', 'Instagram', 'Facebook', 'X'] as const;
 
-export const DemoReadingPage = () => {
+export const LandingPage = () => {
   const sourceVideoInputRef = useRef<HTMLInputElement | null>(null);
   const { sourceVideoUrl, workflowState, setSourceVideoUrl, submitSourceVideoUrl } = useTranscriptWorkflow();
-  const feedback = workflowState.status === 'sample' ? workflowState.feedback : null;
+  const feedback = workflowState.status === 'idle' ? workflowState.feedback : null;
 
   const handleWordmarkActivate = () => {
     sourceVideoInputRef.current?.focus();
@@ -30,7 +34,7 @@ export const DemoReadingPage = () => {
             inputRef={sourceVideoInputRef}
             sourceVideoUrl={sourceVideoUrl}
             feedback={feedback}
-            isLocked={workflowState.status !== 'sample'}
+            isLocked={workflowState.status !== 'idle'}
             onSourceVideoUrlChange={setSourceVideoUrl}
             onSubmitSourceVideo={submitSourceVideoUrl}
           />

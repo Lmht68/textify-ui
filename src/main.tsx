@@ -1,8 +1,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import './index.css';
-import { DemoReadingPage } from './modules/demo-reading/DemoReadingPage';
+import './styles/globals.css';
+import { LandingPage } from './pages/Landing';
 
 const rootElement = document.getElementById('root');
 
@@ -12,6 +12,6 @@ if (rootElement === null) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <DemoReadingPage />
+    <LandingPage />
   </StrictMode>,
 );

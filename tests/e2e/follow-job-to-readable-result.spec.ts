@@ -3,6 +3,16 @@ import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
+declare global {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- Window uses declaration merging.
+  interface Window {
+    __textifyObjectUrls: {
+      created: Array<string>;
+      revoked: Array<string>;
+    };
+  }
+}
+
 import type {
   CancelledTranscriptionJobResponse,
   FailedTranscriptionJobResponse,
@@ -316,7 +326,6 @@ test('should follow queued processing and success states when a Transcript Job c
   await expect(page.getByRole('heading', { name: 'Creating transcript' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'A complete Source Video' })).toBeVisible();
   await expect(page.locator('#transcript-plain-panel p')).toHaveText('A complete fixture Transcript.');
-  await expect(page.getByText('Synthetic demo', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Copy' })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Download' })).toBeEnabled();
   await expect(page.getByRole('link', { name: 'Open source' })).toBeVisible();
@@ -405,7 +414,10 @@ test('should release a pending Transcript Job capability when the page reloads',
   await expect(page.getByRole('heading', { name: 'Waiting to start' })).toBeVisible();
   await page.reload();
 
-  await expect(page.getByRole('heading', { name: 'A short guide to better sleep' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Turn videos into text you can actually use' })).toBeVisible();
+  await expect(page.getByLabel('Source Video URL')).toBeEditable();
+  await expect(page.getByRole('button', { name: 'Get transcript' })).toBeEnabled();
+  await expect(page.locator('.reading-window')).toHaveCount(0);
   await page.waitForTimeout(2_200);
   expect(routes.getCount()).toBe(0);
 });
@@ -606,6 +618,46 @@ test('should copy and download the exact live Transcript when result actions are
   await expect(page.locator('#transcript-download-feedback')).toHaveText('Plain text downloaded.');
   await expect(download).toHaveAccessibleDescription('Plain text downloaded.');
   await expect(download).toBeFocused();
+});
+
+test('should preserve selection and focus when Clipboard API rejects for a live Transcript', async ({
+  browserName,
+  context,
+  page,
+}) => {
+  test.skip(browserName !== 'chromium', 'Clipboard permission control is only deterministic in Chromium.');
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.clipboard, 'writeText', {
+      configurable: true,
+      value: async () => Promise.reject(new Error('Clipboard access rejected.')),
+    });
+  });
+  await showCompletedResult({ page });
+
+  const copy = page.getByRole('button', { name: 'Copy' });
+  await expect(copy).toBeVisible();
+  const selectedText = await page.evaluate(() => {
+    const heading = document.querySelector('h1');
+    const selection = document.getSelection();
+
+    if (heading === null || selection === null) {
+      throw new Error('The test selection could not be created.');
+    }
+
+    const range = document.createRange();
+    range.selectNodeContents(heading);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return selection.toString();
+  });
+  await copy.focus();
+  await page.keyboard.press('Enter');
+
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(`${VIEW_TRANSCRIPT.text}\n`);
+  await expect(page.locator('#transcript-copy-feedback')).toHaveText('Plain text copied.');
+  await expect(copy).toBeFocused();
+  await expect.poll(() => page.evaluate(() => document.getSelection()?.toString())).toBe(selectedText);
 });
 
 test('should retain semantic reading order and accessibility across configured viewports when a Transcript succeeds', async ({

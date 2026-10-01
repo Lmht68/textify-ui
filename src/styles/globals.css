@@ -1,0 +1,149 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-ink: #06090c;
+  --color-enamel: #0b151b;
+  --color-raised-enamel: #102129;
+  --color-paper: #edf0ea;
+  --color-muted-paper: #a8b2af;
+  --color-copper: #c47f5d;
+  --color-mint: #76d7ba;
+  --color-rule: #2a3a40;
+  --color-error: #e79a8d;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, blinkmacsystemfont, "Segoe UI", sans-serif;
+}
+
+:root {
+  color: var(--color-paper);
+  background: var(--color-ink);
+  color-scheme: dark;
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-inline-size: 320px;
+  scroll-behavior: smooth;
+}
+
+body {
+  min-inline-size: 320px;
+  margin: 0;
+  overflow-x: clip;
+  background: var(--color-ink);
+}
+
+body::before {
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  content: '';
+  opacity: 0.025;
+  background-image:
+    repeating-linear-gradient(17deg, transparent 0 5px, rgb(237 240 234 / 0.55) 5px 5.5px),
+    repeating-linear-gradient(31deg, transparent 0 7px, rgb(237 240 234 / 0.35) 7px 7.5px);
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+button,
+input,
+a {
+  font: inherit;
+}
+
+button,
+a {
+  min-inline-size: 44px;
+  min-block-size: 44px;
+}
+
+button {
+  border: 1px solid var(--color-rule);
+  border-radius: 2px;
+  color: var(--color-paper);
+  background: var(--color-raised-enamel);
+  cursor: pointer;
+}
+
+button:not(:disabled):hover {
+  border-color: var(--color-copper);
+  background: var(--color-enamel);
+}
+
+button:disabled {
+  color: var(--color-muted-paper);
+  border-color: var(--color-rule);
+  background: transparent;
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+input {
+  min-inline-size: 44px;
+  min-block-size: 44px;
+  border: 1px solid var(--color-rule);
+  border-radius: 2px;
+  color: var(--color-paper);
+  background: var(--color-ink);
+}
+
+:where(button, input, a):focus-visible {
+  outline: 2px solid var(--color-mint);
+  outline-offset: 3px;
+}
+
+::selection {
+  color: var(--color-ink);
+  background: var(--color-mint);
+}
+
+::-webkit-scrollbar {
+  inline-size: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-ink);
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid var(--color-ink);
+  border-radius: 0;
+  background: var(--color-rule);
+}
+
+.site-shell {
+  inline-size: min(88rem, calc(100% - (2 * clamp(1rem, 4vw, 4rem))));
+  margin-inline: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html,
+  :focus-within {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :where(button, input, a):focus-visible {
+    outline-color: Highlight;
+  }
+}

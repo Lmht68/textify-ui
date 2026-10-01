@@ -5,10 +5,10 @@ import {
   buildYouTubeTimecodeUrl,
   findLiteralMatches,
   formatTimestamp,
-} from '../transcriptResultView';
+} from '../../utils/transcriptResultView';
 
-import type { LiteralMatch, TranscriptView } from '../transcriptResultView';
-import type { TranscriptResult } from '../../transcript-jobs/transport';
+import type { LiteralMatch, TranscriptView } from '../../utils/transcriptResultView';
+import type { TranscriptResult } from '../../services/transcriptJobs';
 
 type TranscriptResultViewerProps = Readonly<{
   activeView: TranscriptView;

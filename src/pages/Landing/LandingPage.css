@@ -1,0 +1,52 @@
+.introduction {
+  padding-block: clamp(1rem, 2.25vw, 2rem) 0;
+}
+
+.introduction h1 {
+  max-inline-size: 14ch;
+  margin: 0;
+  color: var(--color-paper);
+  font-size: clamp(2.5rem, 6vw, 5.5rem);
+  font-weight: 650;
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+
+.introduction > p {
+  max-inline-size: 58ch;
+  margin: 0.75rem 0 0;
+  color: var(--color-muted-paper);
+  font-size: clamp(1rem, 1.1vw, 1.125rem);
+  line-height: 1.6;
+}
+
+.platforms {
+  display: grid;
+  gap: 0.5rem;
+  margin-block-start: 0.75rem;
+  padding-block-start: 0.75rem;
+  border-block-start: 1px solid var(--color-rule);
+  color: var(--color-muted-paper);
+}
+
+.platforms p {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.platforms ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin: 0;
+  padding: 0;
+  color: var(--color-paper);
+  list-style: none;
+}
+
+.platforms li:not(:last-child)::after {
+  margin-inline-start: 1rem;
+  color: var(--color-copper);
+  content: '/';
+}

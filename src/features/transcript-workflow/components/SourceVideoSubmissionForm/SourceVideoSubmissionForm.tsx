@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
 import type { FormEvent, RefObject } from 'react';
 
-import type { SubmissionFeedback } from '../../transcript-workflow/useTranscriptWorkflow';
+import './SourceVideoSubmissionForm.css';
+
+import type { SubmissionFeedback } from '../../hooks/useTranscriptWorkflow';
 
 type SourceVideoSubmissionFormProps = Readonly<{
   inputRef: RefObject<HTMLInputElement | null>;
@@ -58,7 +60,7 @@ export const SourceVideoSubmissionForm = ({
           Paste one public HTTPS video link. Source Videos can be up to 30 minutes.
         </p>
         <output
-          className={feedback?.isInvalid ? 'submission-rail__feedback submission-rail__feedback--error' : 'submission-rail__feedback'}
+          className="submission-rail__feedback"
           id="source-video-url-feedback"
           role={feedback?.politeness === 'assertive' ? 'alert' : 'status'}
           aria-live={feedback?.politeness ?? 'polite'}

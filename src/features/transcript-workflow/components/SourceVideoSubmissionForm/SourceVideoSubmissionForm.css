@@ -1,0 +1,57 @@
+.submission-rail {
+  display: grid;
+  gap: 0.75rem;
+  min-inline-size: 0;
+  margin-block-start: 1.5rem;
+}
+
+.submission-rail__field {
+  display: grid;
+  gap: 0.375rem;
+  min-inline-size: 0;
+}
+
+.submission-rail__label {
+  color: var(--color-paper);
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.submission-rail__field input {
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding-inline: 0.75rem;
+}
+
+.submission-rail__hint,
+.submission-rail__feedback {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.submission-rail__hint {
+  color: var(--color-muted-paper);
+}
+
+.submission-rail__feedback {
+  color: var(--color-error);
+}
+
+.submission-rail__feedback:empty {
+  display: none;
+}
+
+.submission-rail__submit {
+  min-inline-size: max-content;
+  padding-inline: 0.75rem;
+  white-space: nowrap;
+}
+
+@media (min-width: 48rem) {
+  .submission-rail {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+}

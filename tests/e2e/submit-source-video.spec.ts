@@ -10,6 +10,16 @@ const openLandingPage = async (page: Page): Promise<void> => {
   await expect(page.getByRole('main')).toBeVisible();
 };
 
+const expectUnlockedLandingForm = async (page: Page, sourceVideoUrl: string): Promise<void> => {
+  const input = page.getByLabel('Source Video URL');
+  const submit = page.getByRole('button', { name: 'Get transcript' });
+
+  await expect(input).toHaveValue(sourceVideoUrl);
+  await expect(input).toBeEditable();
+  await expect(submit).toBeEnabled();
+  await expect(page.locator('.reading-window')).toHaveCount(0);
+};
+
 const queuedResponse = ({
   self,
   cancel,
@@ -72,6 +82,7 @@ test('should validate only absolute HTTPS URLs before submitting a Source Video'
     await submit.click();
     await expect(feedback).toHaveText(invalidInput.message);
     await expect(input).toBeFocused();
+    await expectUnlockedLandingForm(page, invalidInput.value);
   }
 
   expect(postCount).toBe(0);
@@ -153,7 +164,7 @@ test('should retry once after a connection failure when the second attempt is ac
   expect(retryDelay).toBeLessThan(1_500);
 });
 
-test('should stop automatic work and restore the Demo when both connection attempts fail', async ({ page }) => {
+test('should stop automatic work and restore the initial landing state when both connection attempts fail', async ({ page }) => {
   let postCount = 0;
 
   await page.route('**/api/transcription-jobs', async (route) => {
@@ -165,7 +176,7 @@ test('should stop automatic work and restore the Demo when both connection attem
   await page.getByLabel('Source Video URL').fill('https://example.com/video');
   await page.getByRole('button', { name: 'Get transcript' }).click();
 
-  await expect(page.getByRole('heading', { name: 'A short guide to better sleep' })).toBeVisible();
+  await expectUnlockedLandingForm(page, 'https://example.com/video');
   await expect(
     page.getByText(
       'Textify could not confirm whether a previous attempt was accepted. Trying again may create another Transcript Job.',
@@ -200,7 +211,7 @@ test('should show frontend-owned validation feedback without retrying when the b
   await page.getByLabel('Source Video URL').fill('https://example.com/video');
   await page.getByRole('button', { name: 'Get transcript' }).click();
 
-  await expect(page.getByRole('heading', { name: 'A short guide to better sleep' })).toBeVisible();
+  await expectUnlockedLandingForm(page, 'https://example.com/video');
   await expect(page.locator('#source-video-url-feedback')).toHaveText('Check the Source Video URL and try again.');
   await expect(page.getByText('A private backend detail that must not be rendered.', { exact: true })).toHaveCount(0);
   await page.waitForTimeout(1_100);
@@ -235,7 +246,7 @@ for (const [index, unsafeCapabilityCase] of unsafeCapabilityCases.entries()) {
     await page.getByLabel('Source Video URL').fill('https://example.com/video');
     await page.getByRole('button', { name: 'Get transcript' }).click();
 
-    await expect(page.getByRole('heading', { name: 'A short guide to better sleep' })).toBeVisible();
+    await expectUnlockedLandingForm(page, 'https://example.com/video');
     await expect(page.locator('#source-video-url-feedback')).toHaveText(
       'Textify could not submit this Source Video. Try again.',
     );
@@ -328,7 +339,7 @@ test('should keep a queued capability out of browser-visible and persistent stat
 
   await page.reload();
 
-  await expect(page.getByRole('heading', { name: 'A short guide to better sleep' })).toBeVisible();
+  await expectUnlockedLandingForm(page, '');
   await expect(page.getByRole('heading', { name: 'Waiting to start' })).toHaveCount(0);
   expect(postCount).toBe(1);
 });

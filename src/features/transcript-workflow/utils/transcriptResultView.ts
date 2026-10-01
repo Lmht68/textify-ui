@@ -1,4 +1,4 @@
-import type { TranscriptResult } from '../transcript-jobs/transport';
+import type { TranscriptResult } from '../services/transcriptJobs';
 
 export type TranscriptView = 'plain' | 'timestamps';
 
