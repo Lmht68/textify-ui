@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 import './LandingPage.css';
 
@@ -14,8 +14,24 @@ const SUPPORTED_PLATFORMS = ['YouTube', 'TikTok', 'Instagram', 'Facebook', 'X'] 
 
 export const LandingPage = () => {
   const sourceVideoInputRef = useRef<HTMLInputElement | null>(null);
-  const { sourceVideoUrl, workflowState, setSourceVideoUrl, submitSourceVideoUrl } = useTranscriptWorkflow();
-  const feedback = workflowState.status === 'idle' ? workflowState.feedback : null;
+  const submitButtonRef = useRef<HTMLButtonElement | null>(null);
+  const {
+    sourceVideoUrl,
+    workflowState,
+    submissionFeedback,
+    isSourceVideoSubmissionLocked,
+    setSourceVideoUrl,
+    submitSourceVideoUrl,
+    cancelActiveTranscriptJob,
+    confirmReplacement,
+    declineReplacement,
+  } = useTranscriptWorkflow();
+
+  useEffect(() => {
+    if (workflowState.status === 'submitting') {
+      submitButtonRef.current?.focus();
+    }
+  }, [workflowState.status]);
 
   const handleWordmarkActivate = () => {
     sourceVideoInputRef.current?.focus();
@@ -32,11 +48,15 @@ export const LandingPage = () => {
           </p>
           <SourceVideoSubmissionForm
             inputRef={sourceVideoInputRef}
+            submitButtonRef={submitButtonRef}
             sourceVideoUrl={sourceVideoUrl}
-            feedback={feedback}
-            isLocked={workflowState.status !== 'idle'}
+            feedback={submissionFeedback}
+            workflowState={workflowState}
+            isSubmissionLocked={isSourceVideoSubmissionLocked}
             onSourceVideoUrlChange={setSourceVideoUrl}
             onSubmitSourceVideo={submitSourceVideoUrl}
+            onConfirmReplacement={confirmReplacement}
+            onDeclineReplacement={declineReplacement}
           />
           <div className="platforms">
             <p>Works with public videos from</p>
@@ -47,7 +67,10 @@ export const LandingPage = () => {
             </ul>
           </div>
         </section>
-        <TranscriptReadingWindow workflowState={workflowState} />
+        <TranscriptReadingWindow
+          workflowState={workflowState}
+          onCancelActiveTranscriptJob={cancelActiveTranscriptJob}
+        />
         <HowItWorks />
       </main>
     </>

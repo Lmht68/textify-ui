@@ -94,34 +94,65 @@ test('should validate only absolute HTTPS URLs before submitting a Source Video'
   expect(postCount).toBe(1);
 });
 
-test('should submit only the Source Video URL and show the queued state when accepted', async ({ page }) => {
+test('should keep the queued form available for confirmed replacement when a Source Video is accepted', async ({
+  page,
+}) => {
   let postCount = 0;
-  let requestBody: unknown;
+  let putCount = 0;
+  const requestOrder: Array<string> = [];
   const sourceVideoUrl = 'https://example.com/video';
+  const replacementSourceVideoUrl = 'https://example.com/replacement';
 
   await page.route('**/api/transcription-jobs', async (route) => {
     postCount += 1;
-    requestBody = route.request().postDataJSON();
+    requestOrder.push(`POST ${route.request().postData() ?? ''}`);
     await fulfillAcceptedSubmission(route, '00000000-0000-4000-8000-000000000011');
+  });
+  await page.route('**/api/transcription-jobs/*/cancellation', async (route) => {
+    putCount += 1;
+    requestOrder.push(`PUT ${route.request().postData() ?? ''}`);
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: {
+        'cache-control': 'no-store',
+        'x-request-id': '00000000-0000-4000-8000-000000000001',
+      },
+      body: JSON.stringify({
+        id: '00000000-0000-4000-8000-000000000011',
+        status: 'finished',
+        outcome: 'cancelled',
+        submitted_at: SUBMITTED_AT,
+        started_at: null,
+        finished_at: '2025-01-02T03:04:06+00:00',
+        links: { self: '/api/transcription-jobs/00000000-0000-4000-8000-000000000011' },
+      }),
+    });
   });
   await openLandingPage(page);
 
   const input = page.getByLabel('Source Video URL');
+  const submit = page.getByRole('button', { name: 'Get transcript' });
   await input.fill(sourceVideoUrl);
-  await page.getByRole('button', { name: 'Get transcript' }).click();
+  await submit.click();
 
   await expect(page.getByRole('heading', { name: 'Waiting to start' })).toBeVisible();
-  await expect(
-    page.getByText(
-      'Your Source Video was accepted and is waiting for processing. Keep this page open. Closing or refreshing it will lose access to this Transcript Job.',
-      { exact: true },
-    ),
-  ).toBeVisible();
   await expect(input).toHaveValue(sourceVideoUrl);
-  await expect(input).toHaveAttribute('readonly', '');
-  await expect(page.getByRole('button', { name: 'Get transcript' })).toBeDisabled();
-  expect(requestBody).toEqual({ url: sourceVideoUrl });
-  expect(postCount).toBe(1);
+  await expect(input).toBeEditable();
+  await expect(submit).toBeEnabled();
+  await input.fill(replacementSourceVideoUrl);
+  await submit.click();
+  await expect(page.getByRole('heading', { name: 'Replace this Transcript Job?' })).toBeVisible();
+  expect(requestOrder).toEqual([`POST ${JSON.stringify({ url: sourceVideoUrl })}`]);
+
+  await page.getByRole('button', { name: 'Cancel and replace' }).click();
+  await expect.poll(() => postCount).toBe(2);
+  expect(putCount).toBe(1);
+  expect(requestOrder).toEqual([
+    `POST ${JSON.stringify({ url: sourceVideoUrl })}`,
+    'PUT ',
+    `POST ${JSON.stringify({ url: replacementSourceVideoUrl })}`,
+  ]);
 });
 
 test('should retry once after a connection failure when the second attempt is accepted', async ({ page }) => {

@@ -140,6 +140,16 @@
   color: var(--color-copper);
 }
 
+.command-rail__button[aria-disabled='true'] {
+  border-color: var(--color-rule);
+  background: var(--color-enamel);
+  cursor: default;
+}
+
+.command-rail__button[aria-disabled='true'] .command-rail__label {
+  color: var(--color-muted-paper);
+}
+
 .action-status:empty {
   display: none;
 }

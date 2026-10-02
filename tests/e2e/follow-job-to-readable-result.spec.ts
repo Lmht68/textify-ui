@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import type { Page, Route } from '@playwright/test';
+import type { Locator, Page, Route } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
 declare global {
@@ -10,11 +10,17 @@ declare global {
       created: Array<string>;
       revoked: Array<string>;
     };
+    __textifyCancellationFetches: Array<{
+      method: string;
+      cache: RequestCache | undefined;
+      hasBody: boolean;
+    }>;
   }
 }
 
 import type {
   CancelledTranscriptionJobResponse,
+  ErrorResponse,
   FailedTranscriptionJobResponse,
   ProcessingTranscriptionJobResponse,
   QueuedTranscriptionJobResponse,
@@ -84,17 +90,21 @@ const queuedJobResponse = (capability: string): QueuedTranscriptionJobResponse =
 const processingJobResponse = (
   capability: string,
   cancel = jobCancel(capability),
+  cancellationRequested = false,
 ): ProcessingTranscriptionJobResponse => ({
   id: capability,
   status: 'processing',
   submitted_at: SUBMITTED_AT,
   started_at: STARTED_AT,
-  cancellation_requested: false,
+  cancellation_requested: cancellationRequested,
   links: {
     self: jobSelf(capability),
     cancel,
   },
 });
+
+const cancellationRequestedJobResponse = (capability: string): ProcessingTranscriptionJobResponse =>
+  processingJobResponse(capability, jobCancel(capability), true);
 
 const succeededJobResponse = ({
   capability = JOB_ID,
@@ -152,6 +162,13 @@ const cancelledJobResponse = (capability: string): CancelledTranscriptionJobResp
   links: { self: jobSelf(capability) },
 });
 
+const errorResponse = (code: ErrorResponse['error']['code']): ErrorResponse => ({
+  error: {
+    code,
+    message: 'Private backend error detail.',
+  },
+});
+
 const responseHeaders = (retryAfter: string | undefined): Record<string, string> => ({
   'cache-control': 'no-store',
   'content-type': 'application/json',
@@ -174,10 +191,36 @@ const fulfillAcceptedSubmission = async (
   });
 };
 
-type InspectionResponse = Readonly<{
+type RouteGate = Readonly<{
+  release: () => void;
+  waitUntilStarted: () => Promise<void>;
+  waitUntilReleased: () => Promise<void>;
+  markStarted: () => void;
+}>;
+
+type ScriptedRouteResponse = Readonly<{
   body: unknown;
+  status?: number | undefined;
   retryAfter?: string | undefined;
+  headers?: Record<string, string> | undefined;
   delayMilliseconds?: number | undefined;
+  gate?: RouteGate | undefined;
+}>;
+
+type InspectionResponse = ScriptedRouteResponse;
+
+type CancellationResponse = ScriptedRouteResponse;
+
+type Submission = Readonly<{
+  capability: string;
+  retryAfter?: string | undefined;
+  gate?: RouteGate | undefined;
+}>;
+
+type RequestRecord = Readonly<{
+  method: string;
+  path: string;
+  body: string | null;
 }>;
 
 type JobRouteCallbacks = Readonly<{
@@ -186,9 +229,12 @@ type JobRouteCallbacks = Readonly<{
 }>;
 
 type JobRoutes = Readonly<{
+  postCount: () => number;
   getCount: () => number;
+  putCount: () => number;
   getTimes: () => Array<number>;
   foreignGetCount: () => number;
+  requests: () => Array<RequestRecord>;
 }>;
 
 const installJobRoutes = async (
@@ -196,29 +242,76 @@ const installJobRoutes = async (
     page: Page;
     capability?: string;
     postRetryAfter?: string | undefined;
+    submissions?: ReadonlyArray<Submission>;
     inspections: ReadonlyArray<InspectionResponse>;
+    cancellations?: ReadonlyArray<CancellationResponse>;
     callbacks?: JobRouteCallbacks;
   }>,
 ): Promise<JobRoutes> => {
   const {
     page,
-    capability = JOB_ID,
     inspections,
+    cancellations = [],
     callbacks = {},
   } = options;
   const postRetryAfter = Object.hasOwn(options, 'postRetryAfter') ? options.postRetryAfter : '1';
-  const self = jobSelf(capability);
+  const submissions = options.submissions ?? [{
+    capability: options.capability ?? JOB_ID,
+    retryAfter: postRetryAfter,
+  }];
+  const selfPaths = new Set(submissions.map((submission) => jobSelf(submission.capability)));
+  const cancelPaths = new Set(submissions.map((submission) => jobCancel(submission.capability)));
   const foreignSelf = jobSelf(FOREIGN_JOB_ID);
+  let postCount = 0;
   let getCount = 0;
+  let putCount = 0;
   let foreignGetCount = 0;
   const getTimes: Array<number> = [];
+  const requestRecords: Array<RequestRecord> = [];
 
   await page.route('**/api/transcription-jobs**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    requestRecords.push({
+      method: request.method(),
+      path,
+      body: request.postData(),
+    });
 
     if (request.method() === 'POST' && path === '/api/transcription-jobs') {
-      await fulfillAcceptedSubmission(route, capability, postRetryAfter);
+      const submission = submissions[postCount];
+
+      if (submission === undefined) {
+        throw new Error('The test received more submission requests than it configured.');
+      }
+
+      postCount += 1;
+      submission.gate?.markStarted();
+      await submission.gate?.waitUntilReleased();
+      await fulfillAcceptedSubmission(
+        route,
+        submission.capability,
+        submission.retryAfter ?? postRetryAfter,
+      );
+      return;
+    }
+
+    if (request.method() === 'PUT') {
+      if (!cancelPaths.has(path)) {
+        await route.fulfill({ status: 404 });
+        return;
+      }
+
+      const cancellation = cancellations[putCount];
+
+      if (cancellation === undefined) {
+        throw new Error('The test received more cancellation requests than it configured.');
+      }
+
+      putCount += 1;
+      cancellation.gate?.markStarted();
+      await cancellation.gate?.waitUntilReleased();
+      await fulfillScriptedResponse(route, cancellation);
       return;
     }
 
@@ -233,7 +326,7 @@ const installJobRoutes = async (
       return;
     }
 
-    if (path !== self) {
+    if (!selfPaths.has(path)) {
       await route.fulfill({ status: 404 });
       return;
     }
@@ -241,33 +334,66 @@ const installJobRoutes = async (
     getCount += 1;
     getTimes.push(Date.now());
     callbacks.onRequestStart?.(getCount);
-    const inspection = inspections[Math.min(getCount - 1, inspections.length - 1)];
+    const inspection = inspections[getCount - 1];
 
     if (inspection === undefined) {
       throw new Error('The test received more inspection requests than it configured.');
     }
 
     try {
-      if (inspection.delayMilliseconds !== undefined) {
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, inspection.delayMilliseconds);
-        });
-      }
-
-      await route.fulfill({
-        status: 200,
-        headers: responseHeaders(inspection.retryAfter),
-        body: JSON.stringify(inspection.body),
-      });
+      inspection.gate?.markStarted();
+      await inspection.gate?.waitUntilReleased();
+      await fulfillScriptedResponse(route, inspection);
     } finally {
       callbacks.onRequestComplete?.(getCount);
     }
   });
 
   return {
+    postCount: () => postCount,
     getCount: () => getCount,
+    putCount: () => putCount,
     getTimes: () => getTimes,
     foreignGetCount: () => foreignGetCount,
+    requests: () => requestRecords,
+  };
+};
+
+const fulfillScriptedResponse = async (route: Route, response: ScriptedRouteResponse): Promise<void> => {
+  if (response.delayMilliseconds !== undefined) {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, response.delayMilliseconds);
+    });
+  }
+
+  await route.fulfill({
+    status: response.status ?? 200,
+    headers: response.headers ?? responseHeaders(response.retryAfter),
+    body: JSON.stringify(response.body),
+  });
+};
+
+const createRouteGate = (): RouteGate => {
+  let resolveStarted: () => void = () => undefined;
+  let resolveReleased: () => void = () => undefined;
+  const started = new Promise<void>((resolve) => {
+    resolveStarted = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    resolveReleased = resolve;
+  });
+  let hasStarted = false;
+
+  return {
+    release: resolveReleased,
+    waitUntilStarted: () => started,
+    waitUntilReleased: () => released,
+    markStarted: () => {
+      if (!hasStarted) {
+        hasStarted = true;
+        resolveStarted();
+      }
+    },
   };
 };
 
@@ -1096,3 +1222,588 @@ for (const [platform, sourceVideoUrl] of [
     await expect(page.locator('.transcript__time-link')).toHaveCount(0);
   });
 }
+
+const REPLACEMENT_JOB_ID = '00000000-0000-4000-8000-000000000100';
+
+const expectPoliteCancellationStatus = async (
+  page: Page,
+  button: Locator,
+  message: string,
+): Promise<void> => {
+  const status = page.locator('#transcript-job-cancellation-status');
+
+  await expect(status).toHaveText(message);
+  await expect(status).toHaveAttribute('role', 'status');
+  await expect(status).toHaveAttribute('aria-live', 'polite');
+  await expect(status).toHaveAttribute('aria-atomic', 'true');
+  await expect(button).toHaveAttribute('aria-describedby', 'transcript-job-cancellation-status');
+};
+
+test('should cancel a queued Transcript Job with one empty PUT when a Visitor activates Cancel', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.__textifyCancellationFetches = [];
+    window.fetch = async (input, init) => {
+      const request = new Request(input, init);
+
+      if (new URL(request.url).pathname.endsWith('/cancellation')) {
+        window.__textifyCancellationFetches.push({
+          method: request.method,
+          cache: init?.cache,
+          hasBody: Object.hasOwn(init ?? {}, 'body'),
+        });
+      }
+
+      return originalFetch(input, init);
+    };
+  });
+  const routes = await installJobRoutes({
+    page,
+    inspections: [{ body: queuedJobResponse(JOB_ID), retryAfter: '1' }],
+    cancellations: [{ status: 200, body: cancelledJobResponse(JOB_ID) }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+  const heading = page.getByRole('heading', { name: 'Transcript Job cancelled', exact: true });
+  await expect(heading).toBeVisible();
+  await expect(heading).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toHaveCount(0);
+  expect(routes.putCount()).toBe(1);
+  expect(routes.getCount()).toBe(0);
+  expect(routes.requests()).toEqual([
+    { method: 'POST', path: '/api/transcription-jobs', body: JSON.stringify({ url: SOURCE_VIDEO_URL }) },
+    { method: 'PUT', path: jobCancel(JOB_ID), body: null },
+  ]);
+  expect(await page.evaluate(() => window.__textifyCancellationFetches)).toEqual([
+    { method: 'PUT', cache: 'no-store', hasBody: false },
+  ]);
+});
+
+test('should follow accepted processing cancellation to a focused terminal outcome when cleanup completes', async ({
+  page,
+}) => {
+  const routes = await installJobRoutes({
+    page,
+    inspections: [
+      { body: cancellationRequestedJobResponse(JOB_ID), retryAfter: '1' },
+      { body: cancelledJobResponse(JOB_ID) },
+    ],
+    cancellations: [{
+      status: 202,
+      body: cancellationRequestedJobResponse(JOB_ID),
+      retryAfter: '1',
+    }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+
+  const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
+  await cancel.click();
+  const requested = page.getByRole('button', { name: 'Cancellation requested', exact: true });
+  await expect(page.getByRole('heading', { name: 'Cancelling transcript job', exact: true })).toBeVisible();
+  await expect(requested).toBeFocused();
+  await expectPoliteCancellationStatus(
+    page,
+    requested,
+    'Cancellation accepted. Textify is cleaning up this Transcript Job.',
+  );
+  await expect(page.getByRole('heading', { name: 'Transcript Job cancelled', exact: true })).toBeFocused();
+  expect(routes.putCount()).toBe(1);
+  expect(routes.getCount()).toBe(2);
+});
+
+test('should reject repeated direct cancellation activation when its PUT is pending', async ({ page }) => {
+  const cancellationGate = createRouteGate();
+  const routes = await installJobRoutes({
+    page,
+    inspections: [{ body: queuedJobResponse(JOB_ID), retryAfter: '1' }],
+    cancellations: [{ status: 200, body: cancelledJobResponse(JOB_ID), gate: cancellationGate }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await cancellationGate.waitUntilStarted();
+  const requested = page.getByRole('button', { name: 'Cancellation requested', exact: true });
+  await expect(requested).toBeFocused();
+  await expect(requested).toHaveAttribute('aria-disabled', 'true');
+  await expectPoliteCancellationStatus(page, requested, 'Requesting cancellation.');
+  await requested.press('Enter');
+  await requested.press(' ');
+  await requested.click({ force: true });
+  expect(routes.putCount()).toBe(1);
+
+  cancellationGate.release();
+  await expect(page.getByRole('heading', { name: 'Transcript Job cancelled', exact: true })).toBeFocused();
+});
+
+test('should release the direct cancellation guard when cancellation cannot be confirmed', async ({ page }) => {
+  const routes = await installJobRoutes({
+    page,
+    inspections: [{ body: queuedJobResponse(JOB_ID), retryAfter: '1' }],
+    cancellations: [
+      { status: 500, body: errorResponse('internal_error') },
+      { status: 200, body: cancelledJobResponse(JOB_ID) },
+    ],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  const retry = page.getByRole('button', { name: 'Cancel', exact: true });
+  await expect(retry).toBeFocused();
+  await expectPoliteCancellationStatus(
+    page,
+    retry,
+    'Textify could not confirm cancellation. The Transcript Job is still active. Try again.',
+  );
+  await retry.click();
+
+  await expect(page.getByRole('heading', { name: 'Transcript Job cancelled', exact: true })).toBeFocused();
+  expect(routes.putCount()).toBe(2);
+});
+
+test('should protect confirmed replacement while its cancellation PUT is pending', async ({ page }) => {
+  const cancellationGate = createRouteGate();
+  const newSubmissionGate = createRouteGate();
+  const routes = await installJobRoutes({
+    page,
+    submissions: [
+      { capability: JOB_ID, retryAfter: '1' },
+      { capability: REPLACEMENT_JOB_ID, retryAfter: '1', gate: newSubmissionGate },
+    ],
+    inspections: [{ body: queuedJobResponse(JOB_ID), retryAfter: '1' }],
+    cancellations: [{ status: 200, body: cancelledJobResponse(JOB_ID), gate: cancellationGate }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page, SOURCE_VIDEO_URL);
+  await page.getByLabel('Source Video URL').fill('https://www.youtube.com/watch?v=replacement');
+  await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+
+  const confirm = page.getByRole('button', { name: 'Cancel and replace', exact: true });
+  await expect(confirm).toBeVisible();
+  await confirm.click();
+  await cancellationGate.waitUntilStarted();
+  await expect(confirm).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByRole('button', { name: 'Keep current job', exact: true })).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+  const pendingStatus = page.locator('#replacement-cancellation-pending-status');
+  await expect(pendingStatus).toHaveText('Requesting cancellation before starting the new Source Video.');
+  await expect(pendingStatus).toHaveAttribute('role', 'status');
+  await expect(pendingStatus).toHaveAttribute('aria-live', 'polite');
+  await expect(pendingStatus).toHaveAttribute('aria-atomic', 'true');
+  await expect(confirm).toHaveAttribute('aria-describedby', 'replacement-cancellation-pending-status');
+  await confirm.press('Enter');
+  await confirm.press(' ');
+  await confirm.click({ force: true });
+  await page.getByRole('button', { name: 'Keep current job', exact: true }).click({ force: true });
+  await page.getByLabel('Source Video URL').press('Enter');
+  expect(routes.putCount()).toBe(1);
+  expect(routes.postCount()).toBe(1);
+
+  cancellationGate.release();
+  await newSubmissionGate.waitUntilStarted();
+  const submit = page.getByRole('button', { name: 'Get transcript', exact: true });
+  await expect(submit).toHaveAttribute('aria-disabled', 'true');
+  await expect(submit).toBeFocused();
+  expect(routes.requests().map(({ method, path }) => ({ method, path }))).toEqual([
+    { method: 'POST', path: '/api/transcription-jobs' },
+    { method: 'PUT', path: jobCancel(JOB_ID) },
+    { method: 'POST', path: '/api/transcription-jobs' },
+  ]);
+
+  newSubmissionGate.release();
+  await expect(page.getByRole('heading', { name: 'Waiting to start', exact: true })).toBeVisible();
+});
+
+test('should discard accepted cleanup and submit the confirmed replacement when cancellation returns 202', async ({
+  page,
+}) => {
+  const newSubmissionGate = createRouteGate();
+  const routes = await installJobRoutes({
+    page,
+    submissions: [
+      { capability: JOB_ID, retryAfter: '1' },
+      { capability: REPLACEMENT_JOB_ID, retryAfter: '1', gate: newSubmissionGate },
+    ],
+    inspections: [{ body: queuedJobResponse(JOB_ID), retryAfter: '1' }],
+    cancellations: [{
+      status: 202,
+      body: cancellationRequestedJobResponse(JOB_ID),
+      retryAfter: '1',
+    }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+  await page.getByLabel('Source Video URL').fill('https://www.youtube.com/watch?v=replace-202');
+  await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+  await page.getByRole('button', { name: 'Cancel and replace', exact: true }).click();
+
+  await newSubmissionGate.waitUntilStarted();
+  await expect(page.getByRole('button', { name: 'Get transcript', exact: true })).toBeFocused();
+  expect(routes.requests().map(({ method, path }) => ({ method, path }))).toEqual([
+    { method: 'POST', path: '/api/transcription-jobs' },
+    { method: 'PUT', path: jobCancel(JOB_ID) },
+    { method: 'POST', path: '/api/transcription-jobs' },
+  ]);
+  expect(routes.requests().filter(({ method, path }) => method === 'GET' && path === jobSelf(JOB_ID))).toHaveLength(0);
+
+  newSubmissionGate.release();
+});
+
+test('should preserve active authority and the replacement draft when a Visitor declines replacement', async ({
+  page,
+}) => {
+  const routes = await installJobRoutes({
+    page,
+    inspections: [{ body: queuedJobResponse(JOB_ID), retryAfter: '1' }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+  const replacementUrl = 'https://www.youtube.com/watch?v=declined';
+  await page.getByLabel('Source Video URL').fill(replacementUrl);
+  await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Keep current job', exact: true }).click();
+  const submit = page.getByRole('button', { name: 'Get transcript', exact: true });
+  await expect(submit).toBeFocused();
+  await expect(page.getByLabel('Source Video URL')).toHaveValue(replacementUrl);
+  await expect(page.getByLabel('Source Video URL')).toBeEditable();
+  await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+  expect(routes.putCount()).toBe(0);
+  expect(routes.postCount()).toBe(1);
+});
+
+test('should keep confirmation current for active inspection and submit once for a terminal inspection', async ({
+  page,
+}) => {
+  const activeInspectionGate = createRouteGate();
+  const terminalInspectionGate = createRouteGate();
+  const routes = await installJobRoutes({
+    page,
+    submissions: [
+      { capability: JOB_ID, retryAfter: '1' },
+      { capability: REPLACEMENT_JOB_ID, retryAfter: '1' },
+    ],
+    inspections: [
+      { body: processingJobResponse(JOB_ID), retryAfter: '1', gate: activeInspectionGate },
+      { body: cancelledJobResponse(JOB_ID), gate: terminalInspectionGate },
+    ],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+  await page.getByLabel('Source Video URL').fill('https://www.youtube.com/watch?v=inspection-race');
+  await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+
+  await activeInspectionGate.waitUntilStarted();
+  activeInspectionGate.release();
+  await expect(page.getByRole('heading', { name: 'Replace this Transcript Job?', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Creating transcript', exact: true })).toBeVisible();
+  await terminalInspectionGate.waitUntilStarted();
+  terminalInspectionGate.release();
+  await expect.poll(routes.postCount).toBe(2);
+  await expect(page.getByRole('button', { name: 'Get transcript', exact: true })).toBeFocused();
+});
+
+test('should ignore a stale old inspection while a replacement cancellation is pending', async ({ page }) => {
+  const oldInspectionGate = createRouteGate();
+  const cancellationGate = createRouteGate();
+  const newSubmissionGate = createRouteGate();
+  const routes = await installJobRoutes({
+    page,
+    submissions: [
+      { capability: JOB_ID, retryAfter: '1' },
+      { capability: REPLACEMENT_JOB_ID, retryAfter: '1', gate: newSubmissionGate },
+    ],
+    inspections: [{ body: cancelledJobResponse(JOB_ID), gate: oldInspectionGate }],
+    cancellations: [{ status: 200, body: cancelledJobResponse(JOB_ID), gate: cancellationGate }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+  await oldInspectionGate.waitUntilStarted();
+  await page.getByLabel('Source Video URL').fill('https://www.youtube.com/watch?v=stale');
+  await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+  await page.getByRole('button', { name: 'Cancel and replace', exact: true }).click();
+  await cancellationGate.waitUntilStarted();
+
+  oldInspectionGate.release();
+  await expect(page.locator('#replacement-cancellation-pending-status')).toHaveText(
+    'Requesting cancellation before starting the new Source Video.',
+  );
+  expect(routes.postCount()).toBe(1);
+
+  cancellationGate.release();
+  await newSubmissionGate.waitUntilStarted();
+  newSubmissionGate.release();
+  await expect.poll(routes.postCount).toBe(2);
+});
+
+test('should check a direct completion race before rendering its terminal outcome', async ({ page }) => {
+  const routes = await installJobRoutes({
+    page,
+    inspections: [{ body: cancelledJobResponse(JOB_ID) }],
+    cancellations: [{ status: 409, body: errorResponse('job_already_finished') }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  const checking = page.getByRole('button', { name: 'Checking final outcome', exact: true });
+  await expect(checking).toBeFocused();
+  await expect(checking).toHaveAttribute('aria-disabled', 'true');
+  await expectPoliteCancellationStatus(
+    page,
+    checking,
+    'This Transcript Job finished before cancellation. Checking its final outcome.',
+  );
+  await expect(page.getByRole('heading', { name: 'Transcript Job cancelled', exact: true })).toBeFocused();
+  expect(routes.getCount()).toBe(1);
+});
+
+for (const [name, inspection] of [
+  ['succeeded', { body: succeededJobResponse() }],
+  ['failed', { body: failedJobResponse(JOB_ID) }],
+  ['cancelled', { body: cancelledJobResponse(JOB_ID) }],
+  ['expired', { status: 404, body: errorResponse('job_not_found') }],
+] as const) {
+  test(`should submit immediately without cancellation when a ${name} Transcript Job receives a new Source Video`, async ({
+    page,
+  }) => {
+    const routes = await installJobRoutes({
+      page,
+      submissions: [
+        { capability: JOB_ID, retryAfter: '1' },
+        { capability: REPLACEMENT_JOB_ID, retryAfter: '1' },
+      ],
+      inspections: [inspection],
+    });
+    await openLandingPage(page);
+    await submitSourceVideo(page);
+
+    await expect.poll(routes.getCount).toBe(1);
+    await page.getByLabel('Source Video URL').fill(`https://www.youtube.com/watch?v=${name}`);
+    await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+
+    await expect.poll(routes.postCount).toBe(2);
+    await expect(page.getByRole('heading', { name: 'Replace this Transcript Job?', exact: true })).toHaveCount(0);
+    expect(routes.putCount()).toBe(0);
+  });
+}
+
+for (const [name, cancellation] of [
+  ['a foreign terminal self link', { status: 200, body: cancelledJobResponse(FOREIGN_JOB_ID) }],
+  ['a mismatched terminal status', { status: 200, body: processingJobResponse(JOB_ID) }],
+  ['a false cancellation_requested response', { status: 202, body: processingJobResponse(JOB_ID) }],
+] as const) {
+  test(`should retain active authority when cancellation returns ${name}`, async ({ page }) => {
+    const routes = await installJobRoutes({
+      page,
+      inspections: [{ body: queuedJobResponse(JOB_ID), retryAfter: '1' }],
+      cancellations: [cancellation],
+    });
+    await openLandingPage(page);
+    await submitSourceVideo(page);
+
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    const retry = page.getByRole('button', { name: 'Cancel', exact: true });
+    await expect(retry).toBeFocused();
+    await expectPoliteCancellationStatus(
+      page,
+      retry,
+      'Textify could not confirm cancellation. The Transcript Job is still active. Try again.',
+    );
+    expect(routes.putCount()).toBe(1);
+    expect(routes.getCount()).toBe(0);
+  });
+}
+
+test('should cancel only the replacement capability after a successful replacement', async ({ page }) => {
+  const routes = await installJobRoutes({
+    page,
+    submissions: [
+      { capability: JOB_ID, retryAfter: '1' },
+      { capability: REPLACEMENT_JOB_ID, retryAfter: '1' },
+    ],
+    inspections: [{ body: queuedJobResponse(JOB_ID), retryAfter: '1' }],
+    cancellations: [
+      { status: 200, body: cancelledJobResponse(JOB_ID) },
+      { status: 200, body: cancelledJobResponse(REPLACEMENT_JOB_ID) },
+    ],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+  await page.getByLabel('Source Video URL').fill('https://www.youtube.com/watch?v=second-cancel');
+  await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+  await page.getByRole('button', { name: 'Cancel and replace', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Waiting to start', exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Transcript Job cancelled', exact: true })).toBeFocused();
+  expect(routes.requests().filter(({ method }) => method === 'PUT').map(({ path }) => path)).toEqual([
+    jobCancel(JOB_ID),
+    jobCancel(REPLACEMENT_JOB_ID),
+  ]);
+
+  const browserVisibleState = await page.evaluate(async ({ oldCapability, newCapability }) => {
+    const cacheEntries = await Promise.all(
+      (await caches.keys()).map(async (name) => (await caches.open(name)).keys()),
+    );
+    const serializedState = JSON.stringify({
+      url: window.location.href,
+      dom: document.documentElement.outerHTML,
+      cookies: document.cookie,
+      localStorage: Object.entries(localStorage),
+      sessionStorage: Object.entries(sessionStorage),
+      cacheEntries: cacheEntries.flat().map((request) => request.url),
+    });
+
+    return serializedState.includes(oldCapability) || serializedState.includes(newCapability);
+  }, { oldCapability: JOB_ID, newCapability: REPLACEMENT_JOB_ID });
+
+  expect(browserVisibleState).toBe(false);
+});
+
+test('should submit the confirmed replacement when cancellation reports a completion race', async ({ page }) => {
+  const routes = await installJobRoutes({
+    page,
+    submissions: [
+      { capability: JOB_ID, retryAfter: '1' },
+      { capability: REPLACEMENT_JOB_ID, retryAfter: '1' },
+    ],
+    inspections: [{ body: queuedJobResponse(JOB_ID), retryAfter: '1' }],
+    cancellations: [{ status: 409, body: errorResponse('job_already_finished') }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+  await page.getByLabel('Source Video URL').fill('https://www.youtube.com/watch?v=completion-race');
+  await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+  await page.getByRole('button', { name: 'Cancel and replace', exact: true }).click();
+
+  await expect.poll(routes.postCount).toBe(2);
+  expect(routes.putCount()).toBe(1);
+  expect(routes.requests().filter(({ method, path }) => method === 'GET' && path === jobSelf(JOB_ID))).toHaveLength(0);
+  await expect(page.getByRole('heading', { name: 'Waiting to start', exact: true })).toBeVisible();
+});
+
+test('should preserve a replacement draft without automatic submission when cancellation returns job_not_found', async ({
+  page,
+}) => {
+  const replacementSourceVideoUrl = 'https://www.youtube.com/watch?v=expired-replacement';
+  const routes = await installJobRoutes({
+    page,
+    submissions: [
+      { capability: JOB_ID, retryAfter: '1' },
+      { capability: REPLACEMENT_JOB_ID, retryAfter: '1' },
+    ],
+    inspections: [{ body: queuedJobResponse(JOB_ID), retryAfter: '1' }],
+    cancellations: [{ status: 404, body: errorResponse('job_not_found') }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+  await page.getByLabel('Source Video URL').fill(replacementSourceVideoUrl);
+  await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+  await page.getByRole('button', { name: 'Cancel and replace', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Transcript Job unavailable', exact: true })).toBeFocused();
+  await expect(page.getByLabel('Source Video URL')).toHaveValue(replacementSourceVideoUrl);
+  expect(routes.postCount()).toBe(1);
+  expect(routes.putCount()).toBe(1);
+
+  await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+  await expect.poll(routes.postCount).toBe(2);
+});
+
+test('should start a replacement without another cancellation PUT when cleanup is already accepted', async ({
+  page,
+}) => {
+  const newSubmissionGate = createRouteGate();
+  const routes = await installJobRoutes({
+    page,
+    submissions: [
+      { capability: JOB_ID, retryAfter: '1' },
+      { capability: REPLACEMENT_JOB_ID, retryAfter: '1', gate: newSubmissionGate },
+    ],
+    inspections: [{ body: cancellationRequestedJobResponse(JOB_ID), retryAfter: '1' }],
+    cancellations: [{
+      status: 202,
+      body: cancellationRequestedJobResponse(JOB_ID),
+      retryAfter: '1',
+    }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Cancelling transcript job', exact: true })).toBeVisible();
+  await page.getByLabel('Source Video URL').fill('https://www.youtube.com/watch?v=after-cleanup');
+  await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Start a new Transcript Job?', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Start new transcript', exact: true }).click();
+  await newSubmissionGate.waitUntilStarted();
+  expect(routes.putCount()).toBe(1);
+  expect(routes.postCount()).toBe(2);
+
+  newSubmissionGate.release();
+});
+
+test('should restore replacement confirmation for a retryable cancellation failure', async ({ page }) => {
+  const replacementSourceVideoUrl = 'https://www.youtube.com/watch?v=retry-replacement';
+  const routes = await installJobRoutes({
+    page,
+    inspections: [{ body: queuedJobResponse(JOB_ID), retryAfter: '1' }],
+    cancellations: [{ status: 503, body: errorResponse('job_store_unavailable') }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+  await page.getByLabel('Source Video URL').fill(replacementSourceVideoUrl);
+  await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+  await page.getByRole('button', { name: 'Cancel and replace', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Replace this Transcript Job?', exact: true })).toBeVisible();
+  await expect(page.getByText(
+    'Textify could not confirm cancellation. The Transcript Job is still active. Try again.',
+    { exact: true },
+  )).toBeVisible();
+  await page.getByRole('button', { name: 'Keep current job', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Get transcript', exact: true })).toBeFocused();
+  await expect(page.getByLabel('Source Video URL')).toHaveValue(replacementSourceVideoUrl);
+  expect(routes.postCount()).toBe(1);
+  expect(routes.putCount()).toBe(1);
+});
+
+test('should ignore an old inspection after replacement acceptance cannot reclaim the new submission', async ({
+  page,
+}) => {
+  const oldInspectionGate = createRouteGate();
+  const newSubmissionGate = createRouteGate();
+  const routes = await installJobRoutes({
+    page,
+    submissions: [
+      { capability: JOB_ID, retryAfter: '1' },
+      { capability: REPLACEMENT_JOB_ID, retryAfter: '1', gate: newSubmissionGate },
+    ],
+    inspections: [{ body: succeededJobResponse(), gate: oldInspectionGate }],
+    cancellations: [{ status: 200, body: cancelledJobResponse(JOB_ID) }],
+  });
+  await openLandingPage(page);
+  await submitSourceVideo(page);
+  await oldInspectionGate.waitUntilStarted();
+  await page.getByLabel('Source Video URL').fill('https://www.youtube.com/watch?v=stale-after-acceptance');
+  await page.getByRole('button', { name: 'Get transcript', exact: true }).click();
+  await page.getByRole('button', { name: 'Cancel and replace', exact: true }).click();
+  await newSubmissionGate.waitUntilStarted();
+
+  oldInspectionGate.release();
+  await expect(page.getByRole('heading', { name: 'Sending Source Video', exact: true })).toBeVisible();
+  expect(routes.postCount()).toBe(2);
+  expect(routes.getCount()).toBe(1);
+
+  newSubmissionGate.release();
+});

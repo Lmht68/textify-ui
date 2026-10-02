@@ -1,4 +1,5 @@
 import {
+  zCancelTranscriptionJobApiTranscriptionJobsJobIdCancellationPutResponse,
   zErrorResponse,
   zQueuedTranscriptionJobResponse,
   zTranscriptionJobResponse,
@@ -77,6 +78,7 @@ export type InspectTranscriptJobResult =
     kind: 'processing';
     capability: TranscriptJobCapability;
     retryAfterMilliseconds: number;
+    cancellationRequested: boolean;
   }>
   | Readonly<{ kind: 'succeeded'; result: TranscriptResult }>
   | Readonly<{ kind: 'failed'; code: TranscriptJobErrorCode }>
@@ -85,6 +87,19 @@ export type InspectTranscriptJobResult =
   | Readonly<{ kind: 'network-error' }>
   | Readonly<{ kind: 'aborted' }>
   | Readonly<{ kind: 'contract-error' }>;
+
+export type CancelTranscriptJobResult =
+  | Readonly<{ kind: 'cancelled' }>
+  | Readonly<{
+    kind: 'cancelling';
+    capability: TranscriptJobCapability;
+    retryAfterMilliseconds: number;
+  }>
+  | Readonly<{ kind: 'backend-error'; code: TranscriptJobErrorCode }>
+  | Readonly<{ kind: 'network-error' }>
+  | Readonly<{ kind: 'aborted' }>
+  | Readonly<{ kind: 'contract-error' }>;
+
 
 export const submitSourceVideo = async ({
   sourceVideoUrl,
@@ -174,6 +189,56 @@ export const inspectTranscriptJob = async ({
   }
 };
 
+export const cancelTranscriptJob = async ({
+  capability,
+  signal,
+}: Readonly<{
+  capability: TranscriptJobCapability;
+  signal: AbortSignal;
+}>): Promise<CancelTranscriptJobResult> => {
+  const activeCapability = resolveActiveCapability({
+    links: capability,
+    expectedSelf: resolveCapability(capability.self),
+  });
+
+  if (activeCapability === undefined) {
+    return { kind: 'contract-error' };
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(capability.cancel, {
+      method: 'PUT',
+      cache: 'no-store',
+      signal,
+    });
+  } catch (error: unknown) {
+    if (signal.aborted || isAbortError(error)) {
+      return { kind: 'aborted' };
+    }
+
+    return { kind: 'network-error' };
+  }
+
+  if (signal.aborted) {
+    return { kind: 'aborted' };
+  }
+
+  switch (response.status) {
+    case 200:
+    case 202:
+      return parseCancellationResponse(response, signal, activeCapability);
+    case 404:
+    case 409:
+    case 422:
+    case 500:
+    case 503:
+      return parseCancellationBackendError(response, signal);
+    default:
+      return { kind: 'contract-error' };
+  }
+};
 const parseAcceptedResponse = async (
   response: Response,
   signal: AbortSignal,
@@ -244,7 +309,20 @@ const parseInspectionResponse = async (
   }
 
   switch (parsedResponse.data.status) {
-    case 'queued':
+    case 'queued': {
+      const capability = resolveActiveCapability({
+        links: parsedResponse.data.links,
+        expectedSelf,
+      });
+
+      return capability === undefined
+        ? { kind: 'contract-error' }
+        : {
+          kind: 'queued',
+          capability,
+          retryAfterMilliseconds: parseRetryAfterMilliseconds(response.headers.get('Retry-After')),
+        };
+    }
     case 'processing': {
       const capability = resolveActiveCapability({
         links: parsedResponse.data.links,
@@ -254,9 +332,10 @@ const parseInspectionResponse = async (
       return capability === undefined
         ? { kind: 'contract-error' }
         : {
-          kind: parsedResponse.data.status,
+          kind: 'processing',
           capability,
           retryAfterMilliseconds: parseRetryAfterMilliseconds(response.headers.get('Retry-After')),
+          cancellationRequested: parsedResponse.data.cancellation_requested,
         };
     }
     case 'finished':
@@ -271,6 +350,67 @@ const parseInspectionResponse = async (
         case 'cancelled':
           return { kind: 'cancelled' };
       }
+  }
+};
+
+const parseCancellationResponse = async (
+  response: Response,
+  signal: AbortSignal,
+  inspectedCapability: TranscriptJobCapability,
+): Promise<CancelTranscriptJobResult> => {
+  const parsedJson = await parseJson(response, signal);
+
+  if (parsedJson.kind === 'aborted') {
+    return { kind: 'aborted' };
+  }
+
+  if (parsedJson.kind === 'invalid' || !hasRequiredResponseHeaders(response.headers)) {
+    return { kind: 'contract-error' };
+  }
+
+  const parsedResponse =
+    zCancelTranscriptionJobApiTranscriptionJobsJobIdCancellationPutResponse.safeParse(parsedJson.body);
+  const expectedSelf = resolveCapability(inspectedCapability.self);
+
+  if (!parsedResponse.success || expectedSelf === undefined) {
+    return { kind: 'contract-error' };
+  }
+
+  switch (response.status) {
+    case 200: {
+      if (parsedResponse.data.status !== 'finished' || parsedResponse.data.outcome !== 'cancelled') {
+        return { kind: 'contract-error' };
+      }
+
+      const resolvedSelf = resolveCapability(parsedResponse.data.links.self);
+
+      return resolvedSelf?.href === expectedSelf.href
+        ? { kind: 'cancelled' }
+        : { kind: 'contract-error' };
+    }
+    case 202: {
+      if (
+        parsedResponse.data.status !== 'processing' ||
+        parsedResponse.data.cancellation_requested !== true
+      ) {
+        return { kind: 'contract-error' };
+      }
+
+      const capability = resolveActiveCapability({
+        links: parsedResponse.data.links,
+        expectedSelf,
+      });
+
+      return capability === undefined
+        ? { kind: 'contract-error' }
+        : {
+          kind: 'cancelling',
+          capability,
+          retryAfterMilliseconds: parseRetryAfterMilliseconds(response.headers.get('Retry-After')),
+        };
+    }
+    default:
+      return { kind: 'contract-error' };
   }
 };
 
@@ -301,6 +441,33 @@ const parseBackendError = async (
     : { kind: 'backend-error', code: parsedResponse.data.error.code, requestId };
 };
 
+const parseCancellationBackendError = async (
+  response: Response,
+  signal: AbortSignal,
+): Promise<CancelTranscriptJobResult> => {
+  const parsedJson = await parseJson(response, signal);
+
+  if (parsedJson.kind === 'aborted') {
+    return { kind: 'aborted' };
+  }
+
+  if (parsedJson.kind === 'invalid') {
+    return { kind: 'contract-error' };
+  }
+
+  const parsedResponse = zErrorResponse.safeParse(parsedJson.body);
+
+  if (
+    !parsedResponse.success ||
+    !hasRequiredResponseHeaders(response.headers) ||
+    !isExpectedCancellationErrorCode(response.status, parsedResponse.data.error.code)
+  ) {
+    return { kind: 'contract-error' };
+  }
+
+  return { kind: 'backend-error', code: parsedResponse.data.error.code };
+};
+
 const parseInspectionBackendError = async (
   response: Response,
   signal: AbortSignal,
@@ -320,6 +487,26 @@ const parseInspectionBackendError = async (
   return parsedResponse.success && hasRequiredResponseHeaders(response.headers)
     ? { kind: 'backend-error', code: parsedResponse.data.error.code }
     : { kind: 'contract-error' };
+};
+
+const isExpectedCancellationErrorCode = (
+  status: number,
+  code: TranscriptJobErrorCode,
+): boolean => {
+  switch (status) {
+    case 404:
+      return code === 'job_not_found';
+    case 409:
+      return code === 'job_already_finished';
+    case 422:
+      return code === 'invalid_request';
+    case 500:
+      return code === 'internal_error';
+    case 503:
+      return code === 'job_store_unavailable';
+    default:
+      return false;
+  }
 };
 
 const projectTranscriptResult = (result: TranscriptResultProjection): TranscriptResult | undefined => {
